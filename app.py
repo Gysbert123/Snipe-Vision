@@ -274,51 +274,6 @@ if st.session_state.show_scanner:
     st.info("Click the button below to scan for the top 10 best setups right now!")
 
 
-@st.cache_data(ttl=900)
-def scan():
-    results = []
-    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","NVDA","TSLA","AAPL","SMCI"]
-    
-    for sym in symbols:
-        try:
-            df = yf.download(sym, period="6mo", progress=False)
-            if len(df) < 50: continue
-            
-            df["EMA50"] = ta.ema(df.Close, 50)
-            df["EMA200"] = ta.ema(df.Close, 200)
-            df["RSI"] = ta.rsi(df.Close, 14)
-            
-            latest = df.iloc[-1]
-            score = 0
-            signals = []
-            
-            if latest.EMA50 > latest.EMA200 and df.EMA50.iloc[-2] <= df.EMA200.iloc[-2]:
-                signals.append("Golden Cross"); score += 35
-            
-            if latest.RSI < 30:
-                signals.append("Oversold"); score += 25
-            
-            if latest.Volume > df.Volume.rolling(20).mean().iloc[-1]*2:
-                signals.append("Volume Spike"); score += 20
-            
-            if score >= 50:
-                fig = go.Figure()
-                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="orange")))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="purple")))
-                fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Score {score}/100", 
-                                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
-                
-                buf = BytesIO()
-                fig.write_image(buf, format="png")
-                img = base64.b64encode(buf.getvalue()).decode()
-                
-                results.append({"sym":sym.replace("-USD",""),"score":score,"signals":signals,"chart":f"data:image/png;base64,{img}"})
-        except: 
-            pass
-    
-    return sorted(results, key=lambda x: x["score"], reverse=True)[:10]
-
 def parse_custom_rules(rule_text):
     """Parse custom rules from natural language"""
     rules = []
@@ -474,6 +429,51 @@ def scan_with_custom_rules(custom_rules_text):
             pass
     
     return sorted(results, key=lambda x: x["score"], reverse=True), None
+
+@st.cache_data(ttl=900)
+def scan():
+    results = []
+    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","NVDA","TSLA","AAPL","SMCI"]
+    
+    for sym in symbols:
+        try:
+            df = yf.download(sym, period="6mo", progress=False)
+            if len(df) < 50: continue
+            
+            df["EMA50"] = ta.ema(df.Close, 50)
+            df["EMA200"] = ta.ema(df.Close, 200)
+            df["RSI"] = ta.rsi(df.Close, 14)
+            
+            latest = df.iloc[-1]
+            score = 0
+            signals = []
+            
+            if latest.EMA50 > latest.EMA200 and df.EMA50.iloc[-2] <= df.EMA200.iloc[-2]:
+                signals.append("Golden Cross"); score += 35
+            
+            if latest.RSI < 30:
+                signals.append("Oversold"); score += 25
+            
+            if latest.Volume > df.Volume.rolling(20).mean().iloc[-1]*2:
+                signals.append("Volume Spike"); score += 20
+            
+            if score >= 50:
+                fig = go.Figure()
+                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close))
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="orange")))
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="purple")))
+                fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Score {score}/100", 
+                                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
+                
+                buf = BytesIO()
+                fig.write_image(buf, format="png")
+                img = base64.b64encode(buf.getvalue()).decode()
+                
+                results.append({"sym":sym.replace("-USD",""),"score":score,"signals":signals,"chart":f"data:image/png;base64,{img}"})
+        except: 
+            pass
+    
+    return sorted(results, key=lambda x: x["score"], reverse=True)[:10]
 
 st.markdown("---")
 
