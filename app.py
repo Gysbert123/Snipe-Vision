@@ -16,6 +16,22 @@ from io import BytesIO
 
 st.set_page_config(page_title="SnipeVision", layout="wide", initial_sidebar_state="expanded")
 
+# Initialize session state FIRST
+if 'scans' not in st.session_state:
+    st.session_state.scans = 0
+
+if 'paid' not in st.session_state:
+    st.session_state.paid = False
+
+if 'show_scanner' not in st.session_state:
+    st.session_state.show_scanner = False
+
+if 'show_custom_rules' not in st.session_state:
+    st.session_state.show_custom_rules = False
+
+if 'show_tweet_info' not in st.session_state:
+    st.session_state.show_tweet_info = False
+
 # === BEAUTIFUL LANDING PAGE (put right after st.set_page_config) ===
 
 # Custom CSS — dark, sexy, crypto-native
@@ -24,39 +40,77 @@ st.markdown("""
     .big-title {font-size: 4.5rem !important; font-weight: 900; background: linear-gradient(90deg, #00ff88, #00d0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;}
     .subtitle {font-size: 1.8rem; color: #00ff88; margin-bottom: 2rem;}
     .feature-box {background: rgba(0, 255, 136, 0.1); border-left: 5px solid #00ff88; padding: 1.5rem; border-radius: 10px; margin: 1rem 0;}
-    .stButton>button {background: linear-gradient(45deg, #00ff88, #00d0ff); color: black; font-weight: bold; border-radius: 12px; height: 3.5rem; width: 100%; font-size: 1.3rem;}
+    .stButton>button {background: linear-gradient(45deg, #00ff88, #00d0ff); color: black; font-weight: bold; border-radius: 12px; height: auto; min-height: 3.5rem; width: 100%; font-size: 1rem; padding: 1rem; white-space: pre-line; transition: all 0.3s ease;}
+    .stButton>button:hover {transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);}
     .paywall {background: linear-gradient(45deg, #ff00aa, #ffaa00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2rem; font-weight: 900;}
     .chart-container {border: 2px solid #00ff88; border-radius: 15px; padding: 10px; background: #111;}
 </style>
 """, unsafe_allow_html=True)
 
 # Hero Section
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns([2, 1])
 
 with col1:
     st.markdown("<h1 class='big-title'>SNIPERVISION</h1>", unsafe_allow_html=True)
     st.markdown("<p class='subtitle'>Never stare at charts like a peasant again</p>", unsafe_allow_html=True)
     
 with col2:
-    st.image("https://i.ibb.co.com/0jZ3k7Z/sniper-vision-logo.png", width=300)  # Optional logo (upload one or use this placeholder)
+    # Removed broken image - add your logo here later if needed
+    st.markdown("<div style='height: 200px;'></div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
-# Feature Boxes
-st.markdown("<div class='feature-box'><strong>Quick Snipe (Free)</strong>: One click → top 10 cleanest setups right now</div>", unsafe_allow_html=True)
-st.markdown("<div class='feature-box'><strong>Custom Rules ($5/mo)</strong>: Type your exact strategy → get perfect matches with AI explanations</div>", unsafe_allow_html=True)
-st.markdown("<div class='feature-box'><strong>One-Click Post to X</strong>: Look like a chart god without doing the work</div>", unsafe_allow_html=True)
+# Feature Boxes - Now Interactive
+col1, col2, col3 = st.columns(3)
 
-# Initialize session state
-if 'scans' not in st.session_state:
-    st.session_state.scans = 0
+with col1:
+    if st.button("🚀 **Quick Snipe (Free)**\n\nOne click → top 10 cleanest setups right now", use_container_width=True, key="feature1"):
+        st.session_state.show_scanner = True
+        st.rerun()
 
-if 'paid' not in st.session_state:
-    st.session_state.paid = False
+with col2:
+    if st.button("⚙️ **Custom Rules ($5/mo)**\n\nType your exact strategy → get perfect matches", use_container_width=True, key="feature2"):
+        st.session_state.show_custom_rules = True
+        st.rerun()
+
+with col3:
+    if st.button("🐦 **One-Click Post to X**\n\nLook like a chart god without doing the work", use_container_width=True, key="feature3"):
+        st.session_state.show_tweet_info = True
+        st.rerun()
+
 
 # Paywall glow
 if not st.session_state.paid:
     st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
+
+# Show custom rules section if clicked
+if st.session_state.show_custom_rules:
+    st.markdown("---")
+    st.markdown("### ⚙️ Custom Rules (Premium Feature)")
+    if not st.session_state.paid:
+        st.warning("🔒 This feature requires a $5/mo subscription. Upgrade below to unlock!")
+        if st.button("💳 Upgrade to Premium ($5/mo)"):
+            st.session_state.paid = True
+            st.success("Unlocked! You can now use custom rules.")
+            st.rerun()
+    else:
+        custom_rule = st.text_area("Enter your trading strategy rules:", placeholder="Example: RSI < 30 AND Volume > 2x average AND Price above EMA50")
+        if st.button("🔍 Scan with Custom Rules"):
+            st.info("Custom rules scanning coming soon! For now, use Quick Snipe above.")
+    st.markdown("---")
+
+# Show tweet info if clicked
+if st.session_state.show_tweet_info:
+    st.markdown("---")
+    st.markdown("### 🐦 One-Click Post to X")
+    st.info("After running a scan, each result includes a ready-to-post tweet. Just click 'Copy Tweet' and paste it on X (Twitter)!")
+    st.markdown("---")
+
+# Show scanner section if Quick Snipe was clicked
+if st.session_state.show_scanner:
+    st.markdown("---")
+    st.markdown("### 🚀 Quick Snipe Scanner")
+    st.info("Click the button below to scan for the top 10 best setups right now!")
 
 
 
@@ -124,7 +178,9 @@ def scan():
 
 
 
-if st.button("RUN SNIPE SCAN"):
+st.markdown("---")
+
+if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
 
     if st.session_state.scans >= 5 and not st.session_state.paid:
 
