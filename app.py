@@ -218,9 +218,46 @@ if st.session_state.show_custom_rules:
         st.warning("🔒 This feature requires a $5/mo subscription. Upgrade below to unlock!")
         show_payment_options()
     else:
-        custom_rule = st.text_area("Enter your trading strategy rules:", placeholder="Example: RSI < 30 AND Volume > 2x average AND Price above EMA50")
-        if st.button("🔍 Scan with Custom Rules"):
-            st.info("Custom rules scanning coming soon! For now, use Quick Snipe above.")
+        st.success("✅ Premium unlocked! Create your custom trading strategy below.")
+        st.markdown("**Examples:**")
+        st.code("RSI < 30 AND Volume > 2x average\nRSI > 70 AND Volume spike\nEMA50 > EMA200 (Golden Cross)\nRSI < 30 AND Volume > 2x AND Golden Cross", language=None)
+        
+        custom_rule = st.text_area("Enter your trading strategy rules:", 
+                                 placeholder="Example: RSI < 30 AND Volume > 2x average AND Golden Cross",
+                                 height=100)
+        
+        if st.button("🔍 Scan with Custom Rules", use_container_width=True):
+            if custom_rule.strip():
+                with st.spinner("🔍 Scanning market with your custom rules..."):
+                    results, error = scan_with_custom_rules(custom_rule)
+                
+                if error:
+                    st.error(error)
+                elif results:
+                    st.success(f"✅ Found {len(results)} assets matching your custom rules!")
+                    
+                    for r in results:
+                        c1, c2 = st.columns([3, 1])
+                        
+                        with c1:
+                            st.image(r["chart"])
+                        
+                        with c2:
+                            st.metric(r["sym"], f"Score: {r['score']}/100")
+                            st.write("**Signals:**")
+                            for signal in r["signals"]:
+                                st.write(f"• {signal}")
+                            st.markdown(f"**💡 Explanation:** {r['explanation']}")
+                            
+                            # Tweet export
+                            tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
+                            st.code(tweet, language=None)
+                            if st.button("📋 Copy Tweet", key=f"custom_copy_{r['sym']}"):
+                                st.toast("✅ Copied to clipboard!")
+                else:
+                    st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
+            else:
+                st.info("Please enter your custom rules above.")
     st.markdown("---")
 
 # Show tweet info if clicked
@@ -281,6 +318,162 @@ def scan():
             pass
     
     return sorted(results, key=lambda x: x["score"], reverse=True)[:10]
+
+def parse_custom_rules(rule_text):
+    """Parse custom rules from natural language"""
+    rules = []
+    rule_text = rule_text.upper()
+    
+    # RSI rules
+    if "RSI" in rule_text:
+        if "RSI <" in rule_text or "RSI BELOW" in rule_text:
+            try:
+                value = float([x for x in rule_text.split() if x.replace(".", "").isdigit()][0])
+                rules.append(("RSI", "<", value))
+            except:
+                if "30" in rule_text:
+                    rules.append(("RSI", "<", 30))
+        elif "RSI >" in rule_text or "RSI ABOVE" in rule_text:
+            try:
+                value = float([x for x in rule_text.split() if x.replace(".", "").isdigit()][0])
+                rules.append(("RSI", ">", value))
+            except:
+                if "70" in rule_text:
+                    rules.append(("RSI", ">", 70))
+    
+    # Volume rules
+    if "VOLUME" in rule_text:
+        if "VOLUME >" in rule_text or "VOLUME ABOVE" in rule_text:
+            if "2X" in rule_text or "2 X" in rule_text or "DOUBLE" in rule_text:
+                rules.append(("VOLUME", ">", 2.0))
+            elif "3X" in rule_text or "3 X" in rule_text or "TRIPLE" in rule_text:
+                rules.append(("VOLUME", ">", 3.0))
+            else:
+                rules.append(("VOLUME", ">", 2.0))  # Default 2x
+    
+    # EMA rules
+    if "EMA50" in rule_text and "EMA200" in rule_text:
+        if "EMA50 > EMA200" in rule_text or "GOLDEN CROSS" in rule_text:
+            rules.append(("EMA_CROSS", "GOLDEN", None))
+        elif "EMA50 < EMA200" in rule_text or "DEATH CROSS" in rule_text:
+            rules.append(("EMA_CROSS", "DEATH", None))
+    
+    # Price rules
+    if "PRICE >" in rule_text or "PRICE ABOVE" in rule_text:
+        try:
+            value = float([x for x in rule_text.split() if x.replace(".", "").replace("$", "").isdigit()][0])
+            rules.append(("PRICE", ">", value))
+        except:
+            pass
+    
+    return rules
+
+def scan_with_custom_rules(custom_rules_text):
+    """Scan market with custom rules"""
+    results = []
+    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","NVDA","TSLA","AAPL","SMCI"]
+    
+    # Parse rules
+    rules = parse_custom_rules(custom_rules_text)
+    
+    if not rules:
+        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average'"
+    
+    for sym in symbols:
+        try:
+            df = yf.download(sym, period="6mo", progress=False)
+            if len(df) < 50: continue
+            
+            df["EMA50"] = ta.ema(df.Close, 50)
+            df["EMA200"] = ta.ema(df.Close, 200)
+            df["RSI"] = ta.rsi(df.Close, 14)
+            df["Volume_MA"] = df.Volume.rolling(20).mean()
+            
+            latest = df.iloc[-1]
+            prev = df.iloc[-2]
+            
+            matches = []
+            score = 0
+            signals = []
+            explanation_parts = []
+            
+            # Check each rule
+            for rule in rules:
+                rule_type, operator, value = rule
+                
+                if rule_type == "RSI":
+                    if operator == "<" and latest.RSI < value:
+                        matches.append(True)
+                        score += 30
+                        signals.append(f"RSI {latest.RSI:.1f} < {value}")
+                        explanation_parts.append(f"RSI is oversold at {latest.RSI:.1f}")
+                    elif operator == ">" and latest.RSI > value:
+                        matches.append(True)
+                        score += 30
+                        signals.append(f"RSI {latest.RSI:.1f} > {value}")
+                        explanation_parts.append(f"RSI is overbought at {latest.RSI:.1f}")
+                    else:
+                        matches.append(False)
+                
+                elif rule_type == "VOLUME":
+                    volume_ratio = latest.Volume / latest.Volume_MA if latest.Volume_MA > 0 else 0
+                    if operator == ">" and volume_ratio >= value:
+                        matches.append(True)
+                        score += 25
+                        signals.append(f"Volume {volume_ratio:.1f}x average")
+                        explanation_parts.append(f"Volume spike: {volume_ratio:.1f}x normal")
+                    else:
+                        matches.append(False)
+                
+                elif rule_type == "EMA_CROSS":
+                    if operator == "GOLDEN" and latest.EMA50 > latest.EMA200 and prev.EMA50 <= prev.EMA200:
+                        matches.append(True)
+                        score += 35
+                        signals.append("Golden Cross")
+                        explanation_parts.append("EMA50 just crossed above EMA200 (bullish)")
+                    elif operator == "DEATH" and latest.EMA50 < latest.EMA200 and prev.EMA50 >= prev.EMA200:
+                        matches.append(True)
+                        score += 35
+                        signals.append("Death Cross")
+                        explanation_parts.append("EMA50 just crossed below EMA200 (bearish)")
+                    else:
+                        matches.append(False)
+                
+                elif rule_type == "PRICE":
+                    if operator == ">" and latest.Close > value:
+                        matches.append(True)
+                        score += 20
+                        signals.append(f"Price ${latest.Close:.2f} > ${value}")
+                        explanation_parts.append(f"Price above ${value}")
+                    else:
+                        matches.append(False)
+            
+            # Only include if all rules match
+            if all(matches) and len(matches) > 0:
+                fig = go.Figure()
+                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close))
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="orange")))
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="purple")))
+                fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Custom Rules Match (Score: {score}/100)", 
+                                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
+                
+                buf = BytesIO()
+                fig.write_image(buf, format="png")
+                img = base64.b64encode(buf.getvalue()).decode()
+                
+                explanation = " | ".join(explanation_parts) if explanation_parts else "Matches your custom rules"
+                
+                results.append({
+                    "sym": sym.replace("-USD",""),
+                    "score": score,
+                    "signals": signals,
+                    "chart": f"data:image/png;base64,{img}",
+                    "explanation": explanation
+                })
+        except Exception as e:
+            pass
+    
+    return sorted(results, key=lambda x: x["score"], reverse=True), None
 
 st.markdown("---")
 
