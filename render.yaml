@@ -7,4 +7,14 @@ services:
     envVars:
       - key: PORT
         value: 8501
+      - key: SOLANA_WALLET_ADDRESS
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_SECRET
+        sync: false
+      - key: PAYPAL_MODE
+        value: sandbox
 
