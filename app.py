@@ -51,7 +51,7 @@ st.markdown("""
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown("<h1 class='big-title'>SNIPERVISION</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='big-title'>SNIPEVISION</h1>", unsafe_allow_html=True)
     st.markdown("<p class='subtitle'>Never stare at charts like a peasant again</p>", unsafe_allow_html=True)
     
 with col2:
