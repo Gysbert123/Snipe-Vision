@@ -752,6 +752,47 @@ def rule_to_label(rule):
         return f"Price {operator} {value}"
     return rule_type
 
+
+def classify_bias(signals):
+    """Rudimentary sentiment classifier driven by signal wording."""
+    if not signals:
+        return "Neutral"
+    bull_keywords = ["above", "bull", "golden", "oversold", "support", "spike", "breakout", "accumulation"]
+    bear_keywords = ["below", "bear", "death", "overbought", "resistance", "sell", "short", "breakdown"]
+    bull_hits = sum(any(keyword in signal.lower() for keyword in bull_keywords) for signal in signals)
+    bear_hits = sum(any(keyword in signal.lower() for keyword in bear_keywords) for signal in signals)
+    if bull_hits > bear_hits:
+        return "Bullish"
+    if bear_hits > bull_hits:
+        return "Bearish"
+    return "Neutral"
+
+
+def action_from_bias(bias, score):
+    """Map bias + score to a plain-English trading action."""
+    if bias == "Bullish":
+        return "Potential BUY setup" if score >= 60 else "Bullish but wait for confirmation"
+    if bias == "Bearish":
+        return "Potential SELL / hedge setup" if score >= 60 else "Bearish but patience is advised"
+    return "Indecisive - stay on watch"
+
+
+def build_ai_summary(symbol, timeframe, score, price, change_pct, bias, signals, action, extra_context=None):
+    """Generate a human-readable narrative for the scan result."""
+    key_signals = ", ".join(signals[:3]) if signals else "no major signals"
+    change_str = f"{change_pct:+.2f}%" if change_pct is not None else "0.00%"
+    bias_text = bias.lower() if bias != "Neutral" else "mixed"
+    context = ""
+    if extra_context:
+        context_bits = [part for part in extra_context if part]
+        if context_bits:
+            context = f" Notables: {', '.join(context_bits[:2])}."
+    return (
+        f"{symbol} on the {timeframe} chart looks {bias_text} (score {score}/100). "
+        f"Price is near ${price:,.2f} ({change_str} today) with signals such as {key_signals}. "
+        f"{action}.{context}"
+    ).strip()
+
 def scan_with_custom_rules(custom_rules_text):
     """Scan market with custom rules - supports 50+ indicators, 5-rule limit"""
     results = []
@@ -1085,46 +1126,106 @@ def scan_with_custom_rules(custom_rules_text):
             
             # Only include if ALL rules match
             if all(matches) and len(matches) == len(rules) and len(matches) > 0:
-                # Create enhanced chart with all relevant indicators
+                sym_clean = sym.replace("-USD","")
+                timeframe_label = "1D (Daily)"
+                change_pct = float(((latest.Close - prev.Close) / prev.Close) * 100) if prev.Close != 0 else 0.0
+                price_val = float(latest.Close)
+
+                # Create enhanced chart with overlays + volume
                 fig = go.Figure()
-                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close, name="Price"))
+                fig.add_trace(
+                    go.Candlestick(
+                        x=df.index,
+                        open=df.Open,
+                        high=df.High,
+                        low=df.Low,
+                        close=df.Close,
+                        name="Price",
+                        increasing_line_color="#00ff88",
+                        decreasing_line_color="#ff4d4d",
+                    )
+                )
                 
                 # Add EMAs
                 if indicators.get('EMA_50') is not None:
-                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_50'], name="EMA50", line=dict(color="orange", width=1)))
+                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_50'], name="EMA50", line=dict(color="#ffb347", width=1)))
                 if indicators.get('EMA_200') is not None:
-                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_200'], name="EMA200", line=dict(color="purple", width=1)))
+                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_200'], name="EMA200", line=dict(color="#9b59b6", width=1)))
                 
                 # Add Bollinger Bands if used
                 if any(r[0] == "BB_TOUCH" for r in rules):
                     if indicators.get('BB_Upper') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Upper'], name="BB Upper", line=dict(color="blue", dash="dash", width=1)))
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Upper'], name="BB Upper", line=dict(color="#2980b9", dash="dash", width=1)))
                     if indicators.get('BB_Lower') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Lower'], name="BB Lower", line=dict(color="blue", dash="dash", width=1)))
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Lower'], name="BB Lower", line=dict(color="#2980b9", dash="dash", width=1)))
                 
                 # Add VWAP if used
                 if any(r[0] in ["PRICE_ABOVE_VWAP", "PRICE_BELOW_VWAP"] for r in rules):
                     if indicators.get('VWAP') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['VWAP'], name="VWAP", line=dict(color="yellow", width=1)))
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['VWAP'], name="VWAP", line=dict(color="#f1c40f", width=1)))
+
+                # Volume overlay on secondary axis
+                if "Volume" in df.columns and not df["Volume"].isna().all():
+                    fig.add_trace(
+                        go.Bar(
+                            x=df.index,
+                            y=df["Volume"],
+                            name="Volume",
+                            marker=dict(color="rgba(0,255,136,0.25)"),
+                            yaxis="y2",
+                            opacity=0.35,
+                        )
+                    )
                 
                 fig.update_layout(
-                    height=500, 
-                    title=f"{sym.replace('-USD','')} – Custom Rules Match (Score: {score}/100)",
-                    template="plotly_dark", 
-                    paper_bgcolor="#0e1117", 
+                    height=520,
+                    title=f"{sym_clean} – Custom Rules Match (Score: {score}/100)",
+                    template="plotly_dark",
+                    paper_bgcolor="#0e1117",
                     plot_bgcolor="#0e1117",
-                    xaxis_rangeslider_visible=False
+                    xaxis_rangeslider_visible=False,
+                    hovermode="x unified",
+                    margin=dict(l=40, r=20, t=60, b=40),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    yaxis=dict(title=dict(text="Price")),
+                    yaxis2=dict(
+                        title=dict(text="Volume", font=dict(color="#00ff88")),
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                        rangemode="tozero",
+                        tickfont=dict(color="#00ff88"),
+                    ),
                 )
                 
                 figure_dict = fig.to_dict()
                 explanation = " | ".join(explanation_parts) if explanation_parts else "Matches all your custom rules"
+                bias = classify_bias(signals)
+                action = action_from_bias(bias, score)
+                narrative = build_ai_summary(
+                    sym_clean,
+                    timeframe_label,
+                    score,
+                    price_val,
+                    change_pct,
+                    bias,
+                    signals,
+                    action,
+                    explanation_parts,
+                )
                 
                 results.append({
-                    "sym": sym.replace("-USD",""),
+                    "sym": sym_clean,
                     "score": score,
                     "signals": signals,
                     "figure": figure_dict,
-                    "explanation": explanation
+                    "explanation": explanation,
+                    "timeframe": timeframe_label,
+                    "bias": bias,
+                    "action": action,
+                    "narrative": narrative,
+                    "price": price_val,
+                    "change_pct": change_pct,
                 })
             processed += 1
         except Exception as e:
@@ -1368,11 +1469,19 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                                 st.plotly_chart(fig_obj, use_container_width=True)
                         
                         with c2:
-                            st.metric(r["sym"], f"Score: {r['score']}/100")
+                            delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
+                            st.metric(
+                                f"{r['sym']} • {r.get('timeframe', '1D (Daily)')}",
+                                f"Score: {r['score']}/100",
+                                delta=delta_text,
+                            )
+                            st.write(f"**Last Price:** ${r.get('price', 0):,.2f}")
+                            st.write(f"**Bias:** {r.get('bias', 'Neutral')} • **Call:** {r.get('action', 'Monitor')}")
+                            st.markdown(f"**AI read:** {r.get('narrative', 'Matches your custom rules.')}")                        
                             st.write("**Signals:**")
                             for signal in r["signals"]:
                                 st.write(f"• {signal}")
-                            st.markdown(f"**💡 Explanation:** {r['explanation']}")
+                            st.markdown(f"**💡 Signal details:** {r['explanation']}")
                             
                             # Tweet export
                             tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
@@ -1418,13 +1527,15 @@ def scan():
     for sym in symbols:
         try:
             df = yf.download(sym, period="6mo", progress=False)
-            if len(df) < 50: continue
+            if len(df) < 50:
+                continue
             
             df["EMA50"] = ta.ema(df.Close, 50)
             df["EMA200"] = ta.ema(df.Close, 200)
             df["RSI"] = ta.rsi(df.Close, 14)
             
             latest = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) > 1 else latest
             score = 0
             signals = []
             
@@ -1438,20 +1549,86 @@ def scan():
                 signals.append("Volume Spike"); score += 20
             
             if score >= 50:
+                sym_clean = sym.replace("-USD","")
+                timeframe_label = "1D (Daily)"
+                change_pct = float(((latest.Close - prev.Close) / prev.Close) * 100) if prev.Close != 0 else 0.0
+                price_val = float(latest.Close)
+                
                 fig = go.Figure()
-                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="orange")))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="purple")))
-                fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Score {score}/100", 
-                                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
+                fig.add_trace(
+                    go.Candlestick(
+                        x=df.index,
+                        open=df.Open,
+                        high=df.High,
+                        low=df.Low,
+                        close=df.Close,
+                        name="Price",
+                        increasing_line_color="#00ff88",
+                        decreasing_line_color="#ff4d4d",
+                    )
+                )
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="#ffb347")))
+                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="#9b59b6")))
+                
+                if "Volume" in df.columns and not df["Volume"].isna().all():
+                    fig.add_trace(
+                        go.Bar(
+                            x=df.index,
+                            y=df["Volume"],
+                            name="Volume",
+                            marker=dict(color="rgba(0,255,136,0.25)"),
+                            yaxis="y2",
+                            opacity=0.35,
+                        )
+                    )
+                
+                fig.update_layout(
+                    height=520,
+                    title=f"{sym_clean} – Score {score}/100",
+                    template="plotly_dark",
+                    paper_bgcolor="#0e1117",
+                    plot_bgcolor="#0e1117",
+                    xaxis_rangeslider_visible=False,
+                    hovermode="x unified",
+                    margin=dict(l=40, r=20, t=60, b=40),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    yaxis=dict(title=dict(text="Price")),
+                    yaxis2=dict(
+                        title=dict(text="Volume", font=dict(color="#00ff88")),
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                        rangemode="tozero",
+                        tickfont=dict(color="#00ff88"),
+                    ),
+                )
+                
+                bias = classify_bias(signals)
+                action = action_from_bias(bias, score)
+                narrative = build_ai_summary(
+                    sym_clean,
+                    timeframe_label,
+                    score,
+                    price_val,
+                    change_pct,
+                    bias,
+                    signals,
+                    action,
+                )
                 
                 results.append({
-                    "sym": sym.replace("-USD",""),
+                    "sym": sym_clean,
                     "score": score,
                     "signals": signals,
                     "figure": fig.to_dict(),
+                    "timeframe": timeframe_label,
+                    "price": price_val,
+                    "change_pct": change_pct,
+                    "bias": bias,
+                    "action": action,
+                    "narrative": narrative,
                 })
-        except: 
+        except:
             pass
     
     return sorted(results, key=lambda x: x["score"], reverse=True)[:10]
@@ -1493,12 +1670,25 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
                     st.plotly_chart(fig_obj, use_container_width=True)
             
             with c2:
-                st.metric(r["sym"], f"{r['score']}/100")
-                st.write("**Signals:** " + " • ".join(r["signals"]))
+                delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
+                st.metric(
+                    f"{r['sym']} • {r.get('timeframe', '1D (Daily)')}",
+                    f"{r['score']}/100",
+                    delta=delta_text,
+                )
+                st.write(f"**Last Price:** ${r.get('price', 0):,.2f}")
+                st.write(f"**Bias:** {r.get('bias', 'Neutral')} • **Call:** {r.get('action', 'Monitor')}")
+                st.markdown(f"**AI read:** {r.get('narrative', 'High-probability setup spotted.')}")                
+                if r["signals"]:
+                    st.write("**Signals:**")
+                    for sig in r["signals"]:
+                        st.write(f"• {sig}")
+                else:
+                    st.write("No individual signals provided.")
                 
                 # Tweet export (unlocked for paid users or first 3 scans)
                 if st.session_state.paid or st.session_state.scans <= 3:
-                    tweet = f"🏹 SnipeVision just found {r['sym']} → {' • '.join(r['signals'])} | Score {r['score']}/100\nhttps://snipevision.xyz"
+                    tweet = f"🏹 SnipeVision just found {r['sym']} ({r.get('timeframe','1D')}) → {' • '.join(r['signals'])} | Score {r['score']}/100\nhttps://snipevision.xyz"
                     st.code(tweet, language=None)
                     if st.button("📋 Copy Tweet", key=f"copy_{r['sym']}"):
                         st.toast("✅ Copied to clipboard! Paste it on X now!")
