@@ -11,6 +11,7 @@ import qrcode
 import requests
 from datetime import datetime
 import json
+import re
 
 # Payment imports
 try:
