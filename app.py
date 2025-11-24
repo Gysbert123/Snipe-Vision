@@ -4,6 +4,7 @@ import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
 from io import BytesIO
+import base64
 import os
 import time
 import qrcode
@@ -119,6 +120,33 @@ STATIC_PAGE_CSS = """
 }
 </style>
 """
+
+logo_svg = """
+<svg width="320" height="320" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="pulseFill" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1dffb0" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#06cfff" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#090015" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="arcStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="50%" stop-color="#19d9ff"/>
+      <stop offset="100%" stop-color="#b44bff"/>
+    </linearGradient>
+  </defs>
+  <circle cx="160" cy="160" r="140" fill="url(#pulseFill)" stroke="url(#arcStroke)" stroke-width="4"/>
+  <path d="M60 200 C90 120, 140 110, 160 150" stroke="#19d9ff" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M260 200 C230 120, 180 110, 160 150" stroke="#ff4081" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path d="M90 190 L130 170 L150 210 L210 150 L250 160" stroke="url(#arcStroke)" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <path d="M125 120 L200 120" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
+  <path d="M200 120 L190 105" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
+  <path d="M200 120 L190 135" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="160" cy="160" r="30" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2" fill="none"/>
+  <circle cx="160" cy="160" r="4" fill="#ffffff"/>
+</svg>
+"""
+NEON_LOGO = "data:image/svg+xml;base64," + base64.b64encode(logo_svg.encode("utf-8")).decode("utf-8")
 
 
 def get_request_path():
@@ -281,29 +309,103 @@ handle_static_routes()
 # Custom CSS — dark, sexy, crypto-native
 st.markdown("""
 <style>
-    header[data-testid="stHeader"], div[data-testid="stToolbar"] {display: none !important;}
-    .stAppDeployButton {display: none !important;}
-    .stApp header {height: 0 !important;}
-    .big-title {font-size: 4.5rem !important; font-weight: 900; background: linear-gradient(90deg, #00ff88, #00d0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;}
-    .subtitle {font-size: 1.8rem; color: #00ff88; margin-bottom: 2rem;}
-    .feature-box {background: rgba(0, 255, 136, 0.1); border-left: 5px solid #00ff88; padding: 1.5rem; border-radius: 10px; margin: 1rem 0;}
-    .stButton>button {background: linear-gradient(45deg, #00ff88, #00d0ff); color: black; font-weight: bold; border-radius: 12px; height: auto; min-height: 3.5rem; width: 100%; font-size: 1rem; padding: 1rem; white-space: pre-line; transition: all 0.3s ease;}
-    .stButton>button:hover {transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);}
-    .paywall {background: linear-gradient(45deg, #ff00aa, #ffaa00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5rem; font-weight: 900; text-align: center; padding: 2rem; margin: 2rem 0;}
-    .paywall-box {background: rgba(255, 0, 170, 0.1); border: 3px solid #ff00aa; border-radius: 20px; padding: 3rem; margin: 2rem 0; text-align: center;}
-    .payment-button {background: linear-gradient(45deg, #9945FF, #14F195) !important; color: white !important; font-size: 1.2rem !important; padding: 1.5rem !important; margin: 1rem 0 !important;}
-    .payment-button:hover {box-shadow: 0 0 30px rgba(153, 69, 255, 0.6) !important;}
-    .paypal-button {background: linear-gradient(45deg, #0070ba, #009cde) !important; color: white !important;}
-    .chart-container {border: 2px solid #00ff88; border-radius: 15px; padding: 10px; background: #111;}
-    .scan-counter {font-size: 1.5rem; color: #00ff88; text-align: center; padding: 1rem; background: rgba(0, 255, 136, 0.1); border-radius: 10px; margin: 1rem 0;}
-    .nav-menu {position: fixed; top: 1rem; right: 1.5rem; z-index: 1000;}
-    .nav-menu summary {list-style: none; cursor: pointer; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(0, 255, 136, 0.6); color: #00ff88; font-size: 1.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; box-shadow: 0 0 15px rgba(0,255,136,0.3);}
-    .nav-menu summary::-webkit-details-marker {display: none;}
-    .nav-menu[open] summary {background: linear-gradient(45deg, #00ff88, #00d0ff); color: #0e1117;}
-    .nav-menu .nav-links {margin-top: 0.5rem; background: rgba(14, 17, 23, 0.95); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 0.5rem 0; min-width: 220px; backdrop-filter: blur(6px);}
-    .nav-menu .nav-links a {display: block; padding: 0.6rem 1rem; color: #e6f8ff; text-decoration: none; font-size: 0.95rem;}
-    .nav-menu .nav-links a:hover {background: rgba(0,255,136,0.12); color: #00ff88;}
+:root {
+    --neon-green: #00ff88;
+    --neon-cyan: #19d9ff;
+    --neon-purple: #b44bff;
+    --charcoal: #04040d;
+}
+
+header[data-testid="stHeader"], div[data-testid="stToolbar"], .stAppDeployButton {display: none !important;}
+.stApp {background-color: var(--charcoal); color: #e6f8ff; font-family: 'Space Grotesk', 'Oxanium', 'Segoe UI', sans-serif;}
+
+.sniper-bg, .sniper-bg * {pointer-events: none;}
+.sniper-bg {position: fixed; inset: 0; z-index: -4; background: radial-gradient(circle at 20% 20%, rgba(0,255,136,0.15), transparent 50%), radial-gradient(circle at 80% 10%, rgba(25,217,255,0.2), transparent 50%);}
+.ambient-candles {position: absolute; inset: 0; background-image: linear-gradient(180deg, rgba(0,255,136,0.25) 10%, transparent 60%), linear-gradient(180deg, rgba(25,217,255,0.2) 10%, transparent 70%); background-size: 4px 120px, 2px 90px; animation: floatCandles 12s linear infinite;}
+.ambient-candles--alt {opacity: 0.3; filter: blur(1px); animation-duration: 18s; mix-blend-mode: screen;}
+.silhouette {position: absolute; width: 40vw; height: 40vw; opacity: 0.14; filter: blur(2px);}
+.silhouette-bull {left: -10vw; bottom: 5vh; background: radial-gradient(circle, rgba(0,255,136,0.35), transparent 70%); clip-path: polygon(7% 63%, 20% 55%, 35% 58%, 48% 42%, 58% 37%, 68% 31%, 82% 24%, 94% 32%, 86% 48%, 90% 63%, 78% 74%, 64% 88%, 40% 90%, 22% 80%); animation: floatBull 14s ease-in-out infinite;}
+.silhouette-bear {right: -8vw; top: 10vh; background: radial-gradient(circle, rgba(180,75,255,0.3), transparent 70%); clip-path: polygon(15% 20%, 28% 26%, 44% 23%, 58% 28%, 72% 33%, 82% 46%, 78% 62%, 64% 74%, 48% 70%, 36% 62%, 28% 54%, 18% 40%); animation: floatBear 18s ease-in-out infinite;}
+.scanlines {position: absolute; inset: 0; background: repeating-linear-gradient(transparent 0 6px, rgba(0,0,0,0.15) 6px 12px); mix-blend-mode: screen; opacity: 0.35; animation: scanSweep 9s linear infinite;}
+
+.hero-header {display: flex; gap: 1.5rem; align-items: center; margin-top: 1rem;}
+.sniper-logo {width: 180px; max-width: 40vw; filter: drop-shadow(0 0 25px rgba(0,255,136,0.5)); animation: logoPulse 4s ease-in-out infinite;}
+.hero-copy {flex: 1;}
+.eyebrow {text-transform: uppercase; letter-spacing: 0.45rem; font-size: 0.85rem; color: rgba(25,217,255,0.9);}
+.hyper-title {font-size: clamp(3rem, 6vw, 5.4rem); font-weight: 900; margin: 0.2rem 0; background: linear-gradient(120deg, #00ff88, #19d9ff, #b44bff); background-size: 250% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: gradientShift 6s linear infinite; text-shadow: 0 0 35px rgba(0,255,136,0.4);}
+.subtitle {font-size: 1.2rem; color: #aee9ff; margin-bottom: 1.5rem;}
+
+.hero-stats {display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.1rem; margin-top: 1.5rem;}
+.hero-stat {background: rgba(255,255,255,0.03); border: 1px solid rgba(0,255,136,0.3); border-radius: 18px; padding: 1rem 1.2rem; box-shadow: 0 10px 40px rgba(0,0,0,0.4);}
+.hero-stat span {display: block; font-size: 0.8rem; letter-spacing: 0.2rem; color: rgba(255,255,255,0.6);}
+.hero-stat strong {display: block; margin-top: 0.35rem; font-size: 1.5rem;}
+
+.hero-hud {background: rgba(7,12,24,0.85); border: 1px solid rgba(25,217,255,0.3); border-radius: 28px; padding: 1.8rem; box-shadow: 0 20px 60px rgba(0,0,0,0.55);}
+.hero-hud h3 {margin-top: 0; color: #fff;}
+.hero-hud ul {padding-left: 0; list-style: none; color: #cfeaff;}
+.hero-hud li {margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.4rem;}
+.hero-hud li::before {content: "◆"; color: var(--neon-green); font-size: 0.8rem;}
+
+.nav-menu {position: fixed; top: 1rem; right: 1.5rem; z-index: 10;}
+.nav-menu summary {list-style: none; cursor: pointer; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,255,136,0.6); color: var(--neon-green); font-size: 1.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; box-shadow: 0 0 20px rgba(0,255,136,0.4);}
+.nav-menu summary::-webkit-details-marker {display: none;}
+.nav-menu[open] summary {background: linear-gradient(120deg, #00ff88, #19d9ff); color: #05070e;}
+.nav-menu .nav-links {margin-top: 0.5rem; background: rgba(4,6,18,0.92); border: 1px solid rgba(0,255,136,0.3); border-radius: 16px; padding: 0.6rem 0; min-width: 240px; backdrop-filter: blur(10px);}
+.nav-menu .nav-links a {display: block; padding: 0.5rem 1rem; color: #daf7ff; text-decoration: none; font-size: 0.95rem;}
+.nav-menu .nav-links a:hover {background: rgba(0,255,136,0.12); color: var(--neon-green);}
+
+.feature-grid {margin-top: 1.5rem;}
+.feature-caption {color: rgba(255,255,255,0.7); font-size: 0.95rem; margin-top: 0.6rem;}
+.stButton>button {background: linear-gradient(120deg, #00ff88, #19d9ff, #b44bff); background-size: 200% auto; border: none; border-radius: 999px; color: #03100c; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08rem; min-height: 3.4rem; box-shadow: 0 15px 40px rgba(0,255,136,0.3); transition: transform 0.25s ease, box-shadow 0.25s ease; animation: buttonPulse 4s ease-in-out infinite;}
+.stButton>button:hover {transform: translateY(-3px) scale(1.01); box-shadow: 0 25px 45px rgba(0,255,136,0.4);}
+.stButton>button:focus {outline: none; box-shadow: 0 0 0 2px rgba(0,255,136,0.6);}
+
+.scan-counter {font-size: 1rem; text-align: center; padding: 1rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(0,255,136,0.3); border-radius: 16px; margin: 1.2rem 0; box-shadow: inset 0 0 25px rgba(0,255,136,0.08);}
+
+.paywall {background: linear-gradient(120deg, #ff00aa, #ffaa00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.2rem; font-weight: 800; text-align: center; padding: 1rem 0; margin: 1rem 0;}
+.neon-paywall-hint {background: rgba(255,255,255,0.02); border-left: 4px solid rgba(0,255,136,0.8); padding: 1rem 1.4rem; border-radius: 16px; margin-bottom: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,0.35);}
+.paywall-box {background: rgba(5,6,18,0.9); border: 1px solid rgba(255,0,170,0.35); border-radius: 28px; padding: 2.5rem; margin: 2rem 0; box-shadow: 0 25px 80px rgba(0,0,0,0.6);}
+.paywall-overlay {background: radial-gradient(circle at 30% 20%, rgba(255,0,170,0.2), rgba(0,0,0,0.85)); border: 2px solid rgba(255,0,170,0.45); border-radius: 28px; padding: 2.5rem; text-align: center; box-shadow: 0 25px 80px rgba(255,0,170,0.25);}
+.paywall-overlay h2 {font-size: 2.1rem; margin-bottom: 0.3rem;}
+.paywall-overlay .price-tag {font-size: 3rem; font-weight: 900; color: #fff;}
+.paywall-overlay .price-tag span {font-size: 1rem; text-transform: uppercase; letter-spacing: 0.35rem; display: block; color: rgba(255,255,255,0.6);}
+
+.premium-note {font-size: 0.9rem; color: rgba(255,255,255,0.65);}
+
+.hero-hud .pill, .paywall-overlay .pill {display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2);}
+
+.stMetric {background: rgba(255,255,255,0.03); border-radius: 18px; padding: 1rem;}
+.stMetric > div {color: #fff;}
+
+.matrix-hint {font-size: 0.85rem; letter-spacing: 0.2rem; color: rgba(255,255,255,0.5); text-transform: uppercase; text-align: center; margin-top: 1rem;}
+
+.silky-card {background: rgba(255,255,255,0.025); border-radius: 24px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.04); box-shadow: 0 15px 40px rgba(0,0,0,0.4);}
+
+@keyframes logoPulse {0% {filter: drop-shadow(0 0 15px rgba(0,255,136,0.3));} 50% {filter: drop-shadow(0 0 35px rgba(25,217,255,0.6));} 100% {filter: drop-shadow(0 0 15px rgba(0,255,136,0.3));}}
+@keyframes gradientShift {0% {background-position: 0% 50%;} 100% {background-position: 200% 50%;}}
+@keyframes buttonPulse {0%,100% {box-shadow: 0 20px 40px rgba(0,255,136,0.35);} 50% {box-shadow: 0 30px 60px rgba(25,217,255,0.45);}}
+@keyframes floatCandles {0% {background-position: 0 0, 0 0;} 100% {background-position: 0 -400px, 0 -240px;}}
+@keyframes floatBull {0% {transform: translateY(0) scale(1);} 50% {transform: translateY(-20px) scale(1.05);} 100% {transform: translateY(0) scale(1);}}
+@keyframes floatBear {0% {transform: translateY(0) scale(1);} 50% {transform: translateY(25px) scale(0.95);} 100% {transform: translateY(0) scale(1);}}
+@keyframes scanSweep {0% {background-position: 0 0;} 100% {background-position: 0 100px;}}
+
+@media (max-width: 768px) {
+    .hero-header {flex-direction: column; text-align: center;}
+    .sniper-logo {width: 150px;}
+    .nav-menu {right: 0.8rem;}
+    .paywall-overlay {padding: 1.5rem;}
+}
 </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="sniper-bg">
+    <div class="ambient-candles"></div>
+    <div class="ambient-candles ambient-candles--alt"></div>
+    <div class="silhouette silhouette-bull"></div>
+    <div class="silhouette silhouette-bear"></div>
+    <div class="scanlines"></div>
+</div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
@@ -320,14 +422,55 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Hero Section
-col1, col2 = st.columns([2, 1])
+hero_left, hero_right = st.columns([3, 2])
 
-with col1:
-    st.markdown("<h1 class='big-title'>SNIPEVISION</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='subtitle'>Never stare at charts like a peasant again</p>", unsafe_allow_html=True)
-    
-with col2:
-    st.markdown("<div style='height: 200px;'></div>", unsafe_allow_html=True)
+with hero_left:
+    st.markdown(f"""
+    <div class='hero-header'>
+        <img src="{NEON_LOGO}" alt="SniperVision neon logo" class="sniper-logo" />
+        <div class='hero-copy'>
+            <p class='eyebrow'>AUTOMATED 24/7 ALPHA RADAR</p>
+            <h1 class='hyper-title'>SNIPERVISION</h1>
+            <p class='subtitle'>Neon-grade liquidity optics that surface sniper-ready entries before the herd even yawns.</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class='hero-stats'>
+        <div class='hero-stat'>
+            <span>ASSETS WATCHED</span>
+            <strong>500+</strong>
+        </div>
+        <div class='hero-stat'>
+            <span>FREE SNIPES</span>
+            <strong>3 / session</strong>
+        </div>
+        <div class='hero-stat'>
+            <span>ALGO SIGNALS</span>
+            <strong>50+</strong>
+        </div>
+        <div class='hero-stat'>
+            <span>PREMIUM</span>
+            <strong>$5/mo</strong>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with hero_right:
+    st.markdown("""
+    <div class='hero-hud'>
+        <div class='pill'>LIVE HUD</div>
+        <h3>Sniper console</h3>
+        <ul>
+            <li>Animated candlestick radar with matrix scanlines</li>
+            <li>AI breakdown: buy / sell / hedge bias on every hit</li>
+            <li>Tweet-ready copy + premium charts exported instantly</li>
+            <li>USDC (Solana) or PayPal unlock in seconds</li>
+        </ul>
+        <p class='matrix-hint'>tap a module below and violate resistance</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -336,21 +479,39 @@ if not st.session_state.paid:
     remaining = max(0, 3 - st.session_state.scans)
     st.markdown(f"<div class='scan-counter'>📊 Free Scans Remaining: <strong>{remaining}/3</strong></div>", unsafe_allow_html=True)
 
-# Feature Boxes - Now Interactive
-col1, col2, col3 = st.columns(3)
+# Feature Grid
+feature_cols = st.columns(3)
 
-with col1:
-    if st.button("🚀 **Quick Snipe (Free)**\n\nOne click → top 10 cleanest setups right now", use_container_width=True, key="feature1"):
+with feature_cols[0]:
+    st.markdown("""
+    <div class='silky-card'>
+        <h3>🚀 Quick Snipe</h3>
+        <p class='feature-caption'>Instantly sweep top crypto + AI equities for golden crosses, oversold bounces & volume nukes.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Pulse the radar", use_container_width=True, key="feature1"):
         st.session_state.show_scanner = True
         st.rerun()
 
-with col2:
-    if st.button("⚙️ **Custom Rules ($5/mo)**\n\nType your exact strategy → get perfect matches", use_container_width=True, key="feature2"):
+with feature_cols[1]:
+    st.markdown("""
+    <div class='silky-card'>
+        <h3>⚙️ Custom Rules</h3>
+        <p class='feature-caption'>Chain up to five TA conditions (50+ indicators) and fire only when every clause hits.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Program a hunt", use_container_width=True, key="feature2"):
         st.session_state.show_custom_rules = True
         st.rerun()
 
-with col3:
-    if st.button("🐦 **One-Click Post to X**\n\nLook like a chart god without doing the work", use_container_width=True, key="feature3"):
+with feature_cols[2]:
+    st.markdown("""
+    <div class='silky-card'>
+        <h3>🐦 Viral Output</h3>
+        <p class='feature-caption'>Auto-generate neon chart art + tweet thread bullets so you look like a $99/mo analyst.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Prime tweet mode", use_container_width=True, key="feature3"):
         st.session_state.show_tweet_info = True
         st.rerun()
 
@@ -1360,9 +1521,15 @@ def show_payment_options():
 
 # Paywall glow
 if not st.session_state.paid:
-    st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
-    st.session_state.user_email = st.text_input("Email (required to receive access reminders)", value=st.session_state.user_email, placeholder="you@example.com")
-    st.session_state.user_wallet = st.text_input("Primary Solana wallet (optional, helps auto-unlock)", value=st.session_state.user_wallet, placeholder="e.g. 9xQeWv...Phantom")
+    st.markdown("<p class='paywall'>3 FREE LOCKS • UNLIMITED SNIPES FOR $5/MO</p>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='neon-paywall-hint'>
+        <strong>Sync your arsenal</strong>
+        <p>We tie free scans + premium access to your email so you can bounce between devices without losing progress.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.session_state.user_email = st.text_input("Command console email", value=st.session_state.user_email, placeholder="you@alpha.xyz")
+    st.session_state.user_wallet = st.text_input("Primary Solana wallet (optional, unlock sync)", value=st.session_state.user_wallet, placeholder="e.g. 9xQeWv...Phantom")
 
     # Allow free scans only after email is provided
     email_identifier = st.session_state.user_email.strip()
@@ -1640,14 +1807,23 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
     free_count = get_free_scan_count(email_identifier) if email_identifier else st.session_state.scans
     if not st.session_state.paid and (free_count >= 3 or not email_identifier):
         st.markdown("---")
-        st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
         if not email_identifier:
-            st.markdown("<h2 style='text-align: center; color: #ff00aa;'>🚫 Enter your email to use free scans</h2>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center;'>We need an email to track your usage. This keeps the free scans fair.</p>", unsafe_allow_html=True)
+            st.markdown("""
+            <div class='paywall-overlay'>
+                <div class='pill'>identify yourself</div>
+                <h2>Secure your free shots</h2>
+                <p class='premium-note'>Enter an email above to sync allocations and unlock the complimentary scans across every device.</p>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: #ff00aa;'>🔒 You've Used Your 3 Free Scans</h2>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; font-size: 1.5rem;'>Unlock unlimited scans for <strong>$5/month</strong></p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("""
+            <div class='paywall-overlay'>
+                <div class='pill'>sniper pass</div>
+                <h2>Reload the chamber</h2>
+                <div class='price-tag'>$5<span>per month</span></div>
+                <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Solana / PayPal unlock.</p>
+            </div>
+            """, unsafe_allow_html=True)
         show_payment_options()
     else:
         if not st.session_state.paid and email_identifier:
