@@ -308,10 +308,10 @@ st.markdown("""
 <details class='nav-menu'>
     <summary>&#8942;</summary>
     <div class='nav-links'>
-        <a href='https://snipevision.xyz/terms'>Terms & Conditions</a>
-        <a href='https://snipevision.xyz/privacy'>Privacy Policy</a>
-        <a href='https://snipevision.xyz/refund'>Refund Policy</a>
-        <a href='https://snipevision.xyz/pricing'>Pricing</a>
+        <a href='https://snipevision.xyz/terms?page=terms'>Terms & Conditions</a>
+        <a href='https://snipevision.xyz/privacy?page=privacy'>Privacy Policy</a>
+        <a href='https://snipevision.xyz/refund?page=refund'>Refund Policy</a>
+        <a href='https://snipevision.xyz/pricing?page=pricing'>Pricing</a>
         <a href='mailto:hello@snipevision.xyz'>Contact</a>
     </div>
 </details>
@@ -1500,10 +1500,10 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
 st.caption("SnipeVision • Built with Cursor • Manual TA is dead 2025")
 st.markdown(
     "<div class='footer-links'>"
-    "<a href='https://snipevision.xyz/terms'>Terms</a>"
-    "<a href='https://snipevision.xyz/privacy'>Privacy</a>"
-    "<a href='https://snipevision.xyz/refund'>Refunds</a>"
-    "<a href='https://snipevision.xyz/pricing'>Pricing</a>"
+    "<a href='https://snipevision.xyz/terms?page=terms'>Terms</a>"
+    "<a href='https://snipevision.xyz/privacy?page=privacy'>Privacy</a>"
+    "<a href='https://snipevision.xyz/refund?page=refund'>Refunds</a>"
+    "<a href='https://snipevision.xyz/pricing?page=pricing'>Pricing</a>"
     "<a href='mailto:hello@snipevision.xyz'>Contact</a>"
     "</div>",
     unsafe_allow_html=True,
