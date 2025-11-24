@@ -1528,23 +1528,38 @@ def show_payment_options():
     
     window.connectPhantom = async function() {{
         try {{
+            console.log('Connecting to Phantom...');
             if (window.solana && window.solana.isPhantom) {{
+                console.log('Phantom found, connecting...');
                 const response = await window.solana.connect();
                 window.walletAddress = response.publicKey.toString();
                 window.walletProvider = window.solana;
-                document.getElementById('wallet-address-display').innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
-                document.getElementById('wallet-address-display').style.color = '#00ff88';
-                document.getElementById('connect-section').style.display = 'none';
-                document.getElementById('payment-section').style.display = 'block';
-                // Store in localStorage for Streamlit to read
+                console.log('Connected:', window.walletAddress);
+                
+                const displayEl = document.getElementById('wallet-address-display');
+                const connectEl = document.getElementById('connect-section');
+                const paymentEl = document.getElementById('payment-section');
+                
+                if (displayEl) {{
+                    displayEl.innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
+                    displayEl.style.color = '#00ff88';
+                }}
+                if (connectEl) connectEl.style.display = 'none';
+                if (paymentEl) paymentEl.style.display = 'block';
+                
+                // Store in localStorage
                 localStorage.setItem('wallet_address', window.walletAddress);
                 localStorage.setItem('wallet_connected', 'true');
+                
+                alert('Wallet connected! Address: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8) + '\\n\\nPlease refresh the page to continue.');
                 return window.walletAddress;
             }} else {{
                 alert('Phantom wallet not found! Please install Phantom extension from https://phantom.app');
+                window.open('https://phantom.app', '_blank');
                 return null;
             }}
         }} catch (err) {{
+            console.error('Connection error:', err);
             alert('Failed to connect: ' + err.message);
             return null;
         }}
@@ -1552,22 +1567,37 @@ def show_payment_options():
     
     window.connectSolflare = async function() {{
         try {{
+            console.log('Connecting to Solflare...');
             if (window.solflare) {{
+                console.log('Solflare found, connecting...');
                 await window.solflare.connect();
                 window.walletAddress = window.solflare.publicKey.toString();
                 window.walletProvider = window.solflare;
-                document.getElementById('wallet-address-display').innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
-                document.getElementById('wallet-address-display').style.color = '#00ff88';
-                document.getElementById('connect-section').style.display = 'none';
-                document.getElementById('payment-section').style.display = 'block';
+                console.log('Connected:', window.walletAddress);
+                
+                const displayEl = document.getElementById('wallet-address-display');
+                const connectEl = document.getElementById('connect-section');
+                const paymentEl = document.getElementById('payment-section');
+                
+                if (displayEl) {{
+                    displayEl.innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
+                    displayEl.style.color = '#00ff88';
+                }}
+                if (connectEl) connectEl.style.display = 'none';
+                if (paymentEl) paymentEl.style.display = 'block';
+                
                 localStorage.setItem('wallet_address', window.walletAddress);
                 localStorage.setItem('wallet_connected', 'true');
+                
+                alert('Wallet connected! Address: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8) + '\\n\\nPlease refresh the page to continue.');
                 return window.walletAddress;
             }} else {{
                 alert('Solflare wallet not found! Please install Solflare extension from https://solflare.com');
+                window.open('https://solflare.com', '_blank');
                 return null;
             }}
         }} catch (err) {{
+            console.error('Connection error:', err);
             alert('Failed to connect: ' + err.message);
             return null;
         }}
@@ -1610,24 +1640,36 @@ def show_payment_options():
     }};
     
     // Check for existing connection on load
-    if (localStorage.getItem('wallet_connected') === 'true') {{
-        const addr = localStorage.getItem('wallet_address');
-        if (addr) {{
-            window.walletAddress = addr;
-            document.getElementById('wallet-address-display').innerText = 'Connected: ' + addr.substring(0, 8) + '...' + addr.substring(addr.length - 8);
-            document.getElementById('wallet-address-display').style.color = '#00ff88';
-            document.getElementById('connect-section').style.display = 'none';
-            document.getElementById('payment-section').style.display = 'block';
+    window.checkWalletConnection = function() {{
+        if (localStorage.getItem('wallet_connected') === 'true') {{
+            const addr = localStorage.getItem('wallet_address');
+            if (addr) {{
+                window.walletAddress = addr;
+                const displayEl = document.getElementById('wallet-address-display');
+                const connectEl = document.getElementById('connect-section');
+                const paymentEl = document.getElementById('payment-section');
+                if (displayEl) {{
+                    displayEl.innerText = 'Connected: ' + addr.substring(0, 8) + '...' + addr.substring(addr.length - 8);
+                    displayEl.style.color = '#00ff88';
+                }}
+                if (connectEl) connectEl.style.display = 'none';
+                if (paymentEl) paymentEl.style.display = 'block';
+            }}
         }}
-    }}
+    }};
+    
+    // Run on page load
+    window.addEventListener('load', function() {{
+        window.checkWalletConnection();
+    }});
+    
+    // Also check immediately
+    window.checkWalletConnection();
     </script>
     """, unsafe_allow_html=True)
     
-    # Check if wallet is connected (from localStorage via JavaScript)
-    wallet_connected_js = st.session_state.get('wallet_connected', False)
-    
     # Wallet connection UI
-    if not st.session_state.wallet_connected and not wallet_connected_js:
+    if not st.session_state.wallet_connected:
         st.markdown("### 🔗 Connect Your Wallet")
         st.info("Connect your Phantom or Solflare wallet to pay with USDC")
         
@@ -1646,11 +1688,20 @@ def show_payment_options():
         # Manual wallet address input as fallback
         st.markdown("---")
         st.markdown("**Or enter your wallet address manually:**")
-        manual_wallet = st.text_input("Wallet Address", key="manual_wallet", placeholder="Enter your Solana wallet address")
+        manual_wallet = st.text_input("Wallet Address", key="manual_wallet", placeholder="Enter your Solana wallet address (e.g., 9xQeWvG816bUx9EPjH2T1F67L2Prgktq1XqZgdpvMdmc)")
         if manual_wallet and len(manual_wallet) > 30:
-            st.session_state.wallet_address = manual_wallet
-            st.session_state.wallet_connected = True
-            st.rerun()
+            # Basic validation for Solana address
+            if manual_wallet.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')):
+                st.session_state.wallet_address = manual_wallet
+                st.session_state.wallet_connected = True
+                st.rerun()
+            else:
+                st.error("Invalid Solana wallet address format")
+        
+        # Button to check if wallet was connected via JavaScript
+        if st.button("🔄 Check Wallet Connection", key="check_wallet_js"):
+            # This triggers a rerun to check localStorage
+            st.info("If you connected your wallet via the buttons above, it should appear below. If not, try entering your address manually.")
     
     # Payment UI (shown after wallet is connected)
     if st.session_state.wallet_connected or st.session_state.wallet_address:
@@ -1662,11 +1713,11 @@ def show_payment_options():
         if wallet_addr and len(wallet_addr) > 20:
             st.success(f"✅ Wallet: `{wallet_addr[:8]}...{wallet_addr[-8:]}`")
         
-        st.markdown("""
+        st.markdown(f"""
         <div id="payment-section">
-            <button onclick="sendPayment()" style="width:100%;padding:1.2rem;background:linear-gradient(45deg,#00ff88,#00d0ff);color:#0e1117;border:none;border-radius:10px;font-weight:bold;font-size:1.1rem;cursor:pointer;margin-top:1rem;">💳 Pay $%s USDC</button>
+            <button onclick="sendPayment()" style="width:100%;padding:1.2rem;background:linear-gradient(45deg,#00ff88,#00d0ff);color:#0e1117;border:none;border-radius:10px;font-weight:bold;font-size:1.1rem;cursor:pointer;margin-top:1rem;">💳 Pay ${amount_usdc} USDC</button>
         </div>
-        """ % amount_usdc, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
         st.markdown("**After sending payment, click verify:**")
