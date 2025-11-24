@@ -44,6 +44,13 @@ Never Miss Another 10x - Live trading scanner with real charts and tweet-ready s
    - `expires_at` (timestamp)
 3. Copy `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, `SUPABASE_ANON_KEY` into `.env`
 
+### Step 1.6: Create Supabase table for free scan tracking
+1. In the same Supabase project, add table `free_usage` with columns:
+   - `email` (text, primary key)
+   - `free_count` (int4, default 0)
+   - `updated_at` (timestamp)
+2. This tracks the total number of free scans per email across devices and refreshes.
+
 ### Step 2: Deploy on Render
 
 1. Go to [Render Dashboard](https://dashboard.render.com)

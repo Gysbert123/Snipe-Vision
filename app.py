@@ -73,6 +73,9 @@ if 'user_wallet' not in st.session_state:
 if 'subscription_lookup' not in st.session_state:
     st.session_state.subscription_lookup = ""
 
+if 'free_scans' not in st.session_state:
+    st.session_state.free_scans = 0
+
 
 STATIC_PAGE_CSS = """
 <style>
@@ -357,6 +360,36 @@ def check_subscription_status(identifier):
         return False, "Subscription expired. Please renew."
     except Exception as e:
         return False, f"Lookup error: {str(e)}"
+
+
+def get_free_scan_count(email):
+    client = get_supabase_client()
+    if not client or not email:
+        return 0
+    try:
+        result = client.table("free_usage").select("email, free_count").eq("email", email).limit(1).execute()
+        data = result.data
+        if not data:
+            return 0
+        return data[0].get("free_count", 0)
+    except Exception:
+        return 0
+
+
+def increment_free_scan_count(email):
+    client = get_supabase_client()
+    if not client or not email:
+        return
+    try:
+        current = get_free_scan_count(email)
+        payload = {
+            "email": email,
+            "free_count": current + 1,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        client.table("free_usage").upsert(payload, on_conflict="email").execute()
+    except Exception:
+        pass
 
 
 def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
@@ -1105,6 +1138,17 @@ if not st.session_state.paid:
     st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
     st.session_state.user_email = st.text_input("Email (required to receive access reminders)", value=st.session_state.user_email, placeholder="you@example.com")
     st.session_state.user_wallet = st.text_input("Primary Solana wallet (optional, helps auto-unlock)", value=st.session_state.user_wallet, placeholder="e.g. 9xQeWv...Phantom")
+
+    # Allow free scans only after email is provided
+    email_identifier = st.session_state.user_email.strip()
+    if email_identifier:
+        success, message = check_subscription_status(email_identifier)
+        if success and not st.session_state.paid:
+            st.session_state.paid = True
+            st.success(message)
+    else:
+        st.info("Enter your email above to use free scans or restore a subscription.")
+
     st.markdown("#### Already subscribed? Enter your email or wallet to restore access.")
     st.session_state.subscription_lookup = st.text_input("Email or Solana wallet", value=st.session_state.subscription_lookup, key="lookup_input")
     col_lookup = st.columns([1, 1])
@@ -1274,15 +1318,22 @@ def scan():
 st.markdown("---")
 
 if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
-    # Check free scan limit
-    if st.session_state.scans >= 3 and not st.session_state.paid:
+    email_identifier = st.session_state.user_email.strip()
+    free_count = get_free_scan_count(email_identifier) if email_identifier else st.session_state.scans
+    if not st.session_state.paid and (free_count >= 3 or not email_identifier):
         st.markdown("---")
         st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align: center; color: #ff00aa;'>🔒 You've Used Your 3 Free Scans</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; font-size: 1.5rem;'>Unlock unlimited scans for <strong>$5/month</strong></p>", unsafe_allow_html=True)
+        if not email_identifier:
+            st.markdown("<h2 style='text-align: center; color: #ff00aa;'>🚫 Enter your email to use free scans</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center;'>We need an email to track your usage. This keeps the free scans fair.</p>", unsafe_allow_html=True)
+        else:
+            st.markdown("<h2 style='text-align: center; color: #ff00aa;'>🔒 You've Used Your 3 Free Scans</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; font-size: 1.5rem;'>Unlock unlimited scans for <strong>$5/month</strong></p>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         show_payment_options()
     else:
+        if not st.session_state.paid and email_identifier:
+            increment_free_scan_count(email_identifier)
         st.session_state.scans += 1
         
         with st.spinner("🔍 Scanning the entire market..."):
