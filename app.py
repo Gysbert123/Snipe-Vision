@@ -15,6 +15,8 @@ import re
 import secrets
 from urllib.parse import urlencode
 from ta_indicators import calculate_all_indicators
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+from streamlit.web.server.server import Server
 try:
     from supabase import create_client
 except ImportError:
@@ -70,6 +72,155 @@ if 'user_wallet' not in st.session_state:
 
 if 'subscription_lookup' not in st.session_state:
     st.session_state.subscription_lookup = ""
+
+
+STATIC_PAGE_CSS = """
+<style>
+.static-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1rem 4rem;
+    color: #e6f8ff;
+}
+.static-page h1, .static-page h2 {
+    font-weight: 800;
+    background: linear-gradient(90deg, #00ff88, #00d0ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.static-card {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+    padding: 1.5rem;
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 0 25px rgba(0, 255, 136, 0.05);
+}
+.static-page li {
+    margin-bottom: 0.5rem;
+}
+.static-back {
+    margin-top: 2rem;
+}
+.footer-links {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.95rem;
+}
+.footer-links a {
+    color: #00ffcc;
+    text-decoration: none;
+    margin: 0 0.7rem;
+}
+.footer-links a:hover {
+    text-decoration: underline;
+}
+</style>
+"""
+
+
+def get_request_path():
+    try:
+        ctx = get_script_run_ctx()
+        if ctx is None:
+            return "/"
+        server = Server.get_current()
+        if server is None:
+            return "/"
+        session_info = server._session_mgr.list_active_sessions().get(ctx.session_id)
+        if session_info and getattr(session_info, "ws", None):
+            return session_info.ws.request.path or "/"
+    except Exception:
+        return "/"
+    return "/"
+
+
+def render_static_page(markdown_content):
+    st.markdown(STATIC_PAGE_CSS, unsafe_allow_html=True)
+    st.markdown(f"<div class='static-page'>{markdown_content}</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='static-back'><a href='/' style='color:#00ff88;text-decoration:none;'>← Back to SnipeVision</a></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_terms_page():
+    content = """
+# Terms of Service – SnipeVision
+
+Last updated: 24 November 2025
+
+<div class='static-card'>
+1. **Acceptance.** By accessing SnipeVision you agree to these Terms and our Privacy Policy.<br>
+2. **Service.** We provide chart analysis, alerts, and educational content on an “as-is” basis. SnipeVision is not financial advice.<br>
+3. **Accounts.** Keep your login, wallet, or subscription details secure. You are responsible for activity under your access.<br>
+4. **Payments.** Monthly fees are billed in advance. Failed payments may pause access. Refund policy applies as published.<br>
+5. **Restrictions.** Do not misuse, reverse engineer, or resell the service. We may suspend accounts that break the rules.<br>
+6. **Limitation of Liability.** We are not liable for trading losses, missed opportunities, or indirect damages.<br>
+7. **Changes.** We may update these Terms. Continued use after updates means you accept the new Terms.<br>
+8. **Contact.** hello@snipevision.xyz
+</div>
+"""
+    render_static_page(content)
+    st.stop()
+
+
+def render_privacy_page():
+    content = """
+# Privacy Policy – SnipeVision
+
+Last updated: 24 November 2025
+
+<div class='static-card'>
+- **Information we collect.** Email, subscription status, wallet references, and usage logs needed to deliver the service.<br>
+- **How we use it.** To manage subscriptions, send product updates, improve the app, and comply with legal duties.<br>
+- **Sharing.** We only share data with infrastructure providers (hosting, analytics, payment processors) under strict contracts.<br>
+- **Security.** We use encryption, access controls, and monitoring to protect your data.<br>
+- **Your rights.** Request access, correction, or deletion anytime by emailing hello@snipevision.xyz.<br>
+- **Retention.** Subscription data is kept while your account is active and for legal recordkeeping after cancellation.<br>
+- **International transfers.** Data may be processed in the US and EU. We rely on standard contractual clauses where required.
+</div>
+"""
+    render_static_page(content)
+    st.stop()
+
+
+def render_refund_page():
+    content = """
+# Refund Policy – SnipeVision
+
+Last updated: 24 November 2025
+
+<div class='static-card'>
+<ul>
+<li>Monthly subscriptions ($5/month) are non-refundable for the current billing period.</li>
+<li>You can cancel anytime — no further charges.</li>
+<li>If you accidentally subscribed twice or were charged in error, contact support within 7 days at <a href="mailto:hello@snipevision.xyz">hello@snipevision.xyz</a> with your transaction ID and we’ll issue a full refund.</li>
+<li>No refunds for partial months or usage.</li>
+</ul>
+</div>
+"""
+    render_static_page(content)
+    st.stop()
+
+
+def handle_static_routes():
+    path = get_request_path().strip("/").lower()
+    page_param = st.query_params.get("page", "").lower() if st.query_params.get("page") else ""
+    target = None
+    for candidate in [path, page_param]:
+        if candidate in ("terms", "privacy", "refund"):
+            target = candidate
+            break
+    if target == "terms":
+        render_terms_page()
+    elif target == "privacy":
+        render_privacy_page()
+    elif target == "refund":
+        render_refund_page()
+
+
+handle_static_routes()
 
 # === BEAUTIFUL LANDING PAGE ===
 
@@ -1149,3 +1300,12 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
                     st.info("🔒 Tweet export locked. Upgrade to unlock!")
 
 st.caption("SnipeVision • Built with Cursor • Manual TA is dead 2025")
+st.markdown(
+    "<div class='footer-links'>"
+    "<a href='/terms?page=terms'>Terms</a>"
+    "<a href='/privacy?page=privacy'>Privacy</a>"
+    "<a href='/refund?page=refund'>Refunds</a>"
+    "<a href='mailto:hello@snipevision.xyz'>Contact</a>"
+    "</div>",
+    unsafe_allow_html=True,
+)
