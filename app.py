@@ -9,10 +9,16 @@ import os
 import time
 import qrcode
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import re
+import secrets
+from urllib.parse import urlencode
 from ta_indicators import calculate_all_indicators
+try:
+    from supabase import create_client
+except ImportError:
+    create_client = None
 
 # Payment imports
 try:
@@ -49,6 +55,21 @@ if 'payment_pending' not in st.session_state:
 
 if 'payment_id' not in st.session_state:
     st.session_state.payment_id = None
+
+if 'solana_reference' not in st.session_state:
+    st.session_state.solana_reference = None
+
+if 'solana_pay_url' not in st.session_state:
+    st.session_state.solana_pay_url = None
+
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = ""
+
+if 'user_wallet' not in st.session_state:
+    st.session_state.user_wallet = ""
+
+if 'subscription_lookup' not in st.session_state:
+    st.session_state.subscription_lookup = ""
 
 # === BEAUTIFUL LANDING PAGE ===
 
@@ -123,6 +144,96 @@ def verify_payment(payment_id, method):
     except:
         return False
     return False
+
+SOLANA_USDC_MINT = os.getenv("SOLANA_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+SOLANA_DEFAULT_AMOUNT = float(os.getenv("SOLANA_SUB_AMOUNT", "5"))
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+
+@st.cache_resource(show_spinner=False)
+def get_supabase_client():
+    if not create_client:
+        return None
+    url = SUPABASE_URL
+    key = SUPABASE_SERVICE_ROLE or SUPABASE_ANON_KEY
+    if not url or not key:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def save_subscription_record(email, wallet, reference, tx_amount):
+    client = get_supabase_client()
+    if not client:
+        return
+    payload = {
+        "email": email or None,
+        "wallet": wallet or None,
+        "reference": reference,
+        "amount": tx_amount,
+        "status": "active",
+        "paid_at": datetime.utcnow().isoformat(),
+        "expires_at": (datetime.utcnow() + timedelta(days=30)).isoformat(),
+    }
+    try:
+        client.table("subscriptions").upsert(payload, on_conflict="reference").execute()
+    except Exception:
+        pass
+
+
+def check_subscription_status(identifier):
+    client = get_supabase_client()
+    if not client or not identifier:
+        return False, "Subscription lookup unavailable."
+    try:
+        query = client.table("subscriptions")\
+            .select("*")\
+            .or_(f"email.eq.{identifier},wallet.eq.{identifier}")\
+            .order("expires_at", desc=True)\
+            .limit(1)\
+            .execute()
+        data = query.data
+        if not data:
+            return False, "No active subscription found."
+        record = data[0]
+        expires_at = datetime.fromisoformat(record["expires_at"])
+        if expires_at > datetime.utcnow():
+            return True, f"Active until {expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
+        return False, "Subscription expired. Please renew."
+    except Exception as e:
+        return False, f"Lookup error: {str(e)}"
+
+
+def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
+    """Generate Solana Pay transaction request URL + reference"""
+    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+    label = "SnipeVision Premium"
+    message = "Unlock unlimited scans"
+    memo = f"SnipeVision-{int(time.time())}"
+
+    # Reference must be unique so webhook can identify payment
+    if SOLANA_AVAILABLE:
+        reference = str(Keypair().public_key)
+    else:
+        reference = secrets.token_hex(16)
+
+    params = {
+        "amount": amount,
+        "spl-token": SOLANA_USDC_MINT,
+        "reference": reference,
+        "label": label,
+        "message": message,
+        "memo": memo,
+    }
+
+    query = urlencode(params)
+    solana_url = f"solana:{recipient}?{query}"
+    return solana_url, reference
+
 
 def parse_custom_rules(rule_text):
     """Parse custom rules from natural language - supports 50+ indicators"""
@@ -350,9 +461,10 @@ def scan_with_custom_rules(custom_rules_text):
     
     for sym in symbols[:500]:  # Limit to 500 for speed
         try:
-            # Download data - support multiple timeframes (default daily)
-            df = yf.download(sym, period="6mo", interval="1d", progress=False)
-            if len(df) < 200: continue  # Need enough data for 200 EMA
+            # Download data - use up to 2 years to ensure EMA/indicator coverage
+            df = yf.download(sym, period="2y", interval="1d", progress=False)
+            if len(df) < 60:
+                continue
             
             # Calculate all indicators
             indicators = calculate_all_indicators(df)
@@ -714,45 +826,79 @@ def show_payment_options():
     
     with col1:
         st.markdown("### 💎 Pay with USDC (Solana)")
-        st.info("Send $5 USDC to our Solana wallet. Instant unlock!")
-        
-        solana_address = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+        st.info("Scan the QR or connect Phantom/Solflare. Pay $5 USDC on Solana to unlock instantly.")
         
         if st.button("💰 Pay with USDC", key="pay_solana", use_container_width=True):
-            st.session_state.payment_method = "solana"
-            st.session_state.payment_pending = True
-            st.session_state.payment_id = f"sol_{int(time.time())}"
-            st.rerun()
+            if not st.session_state.user_email.strip():
+                st.warning("Please enter your email before paying so we can restore access later.")
+            else:
+                st.session_state.payment_method = "solana"
+                st.session_state.payment_pending = True
+                st.session_state.solana_reference = None
+                st.session_state.solana_pay_url = None
+                st.session_state.payment_id = None
+                st.rerun()
         
         if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
+            if not st.session_state.solana_pay_url:
+                sol_url, reference = generate_solana_pay_request()
+                st.session_state.solana_pay_url = sol_url
+                st.session_state.solana_reference = reference
+                st.session_state.payment_id = reference
+            
+            sol_pay_url = st.session_state.solana_pay_url
+            reference = st.session_state.solana_reference
+            recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+            
             st.markdown("---")
-            st.markdown("### 📱 Payment Instructions")
-            st.markdown(f"**Send exactly $5 USDC to:**")
-            st.code(solana_address, language=None)
+            st.markdown("### 📱 Pay with Any Solana Wallet")
+            st.markdown(f"**Amount:** {SOLANA_DEFAULT_AMOUNT} USDC")
+            st.markdown(f"**Recipient:** `{recipient}`")
+            st.markdown(f"**Reference:** `{reference}`")
             
-            try:
-                qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                qr.add_data(f"solana:{solana_address}?amount=5&token=USDC")
-                qr.make(fit=True)
-                img_qr = qr.make_image(fill_color="#00ff88", back_color="#0e1117")
-                buf_qr = BytesIO()
-                img_qr.save(buf_qr, format="PNG")
-                buf_qr.seek(0)
-                st.image(buf_qr, width=300)
-            except Exception as e:
-                st.info(f"QR code: {str(e)}")
+            cols = st.columns(2)
+            with cols[0]:
+                st.markdown("**Scan with Phantom / Solflare (mobile):**")
+                try:
+                    qr = qrcode.QRCode(version=1, box_size=8, border=4)
+                    qr.add_data(sol_pay_url)
+                    qr.make(fit=True)
+                    img_qr = qr.make_image(fill_color="#00ff88", back_color="#0e1117")
+                    buf_qr = BytesIO()
+                    img_qr.save(buf_qr, format="PNG")
+                    buf_qr.seek(0)
+                    st.image(buf_qr, width=220)
+                except Exception as e:
+                    st.info(f"QR code error: {str(e)}")
             
-            st.markdown("**After sending, click below to verify:**")
-            if st.button("✅ Verify Payment", key="verify_solana"):
-                if verify_payment(st.session_state.payment_id, "solana"):
+            with cols[1]:
+                st.markdown("**Desktop Wallet:**")
+                st.write("1. Click the button below\n2. Phantom/Solflare will open with the payment pre-filled\n3. Approve to unlock instantly")
+                st.markdown(f"<a class='sol-pay-link' href='{sol_pay_url}' target='_blank' style='display:inline-block;padding:0.9rem 1.2rem;background:linear-gradient(45deg,#9945FF,#14F195);color:white;border-radius:10px;text-decoration:none;font-weight:bold;'>🔗 Open in Phantom / Solflare</a>", unsafe_allow_html=True)
+            
+            st.markdown("**After paying, click verify:**")
+            if st.button("✅ I've Paid – Verify USDC", key="verify_solana"):
+                if verify_payment(reference, "solana"):
                     st.session_state.paid = True
                     st.session_state.payment_pending = False
-                    st.success("✅ Payment verified! You now have unlimited access!")
+                    save_subscription_record(
+                        st.session_state.user_email.strip(),
+                        st.session_state.user_wallet.strip(),
+                        reference,
+                        SOLANA_DEFAULT_AMOUNT,
+                    )
+                    st.success("✅ Payment detected! Unlimited scans unlocked.")
                     st.balloons()
                     st.rerun()
                 else:
-                    st.warning("Payment not detected yet. Please wait a moment and try again.")
-                    st.info("💡 In production, this is verified automatically via Helius webhook")
+                    st.warning("Payment not detected yet. Wait 2-3 seconds and try again.")
+                    st.info("💡 In production this verifies automatically via Helius webhook.")
+            
+            if st.button("↻ Refresh Solana Payment", key="refresh_solana"):
+                st.session_state.solana_pay_url = None
+                st.session_state.solana_reference = None
+                st.session_state.payment_id = None
+                st.rerun()
     
     with col2:
         st.markdown("### 💳 Pay with PayPal")
@@ -777,6 +923,12 @@ def show_payment_options():
                 if st.button("✅ Simulate PayPal Payment", key="simulate_paypal"):
                     st.session_state.paid = True
                     st.session_state.payment_pending = False
+                    save_subscription_record(
+                        st.session_state.user_email.strip(),
+                        st.session_state.user_wallet.strip(),
+                        f"paypal-{int(time.time())}",
+                        SOLANA_DEFAULT_AMOUNT,
+                    )
                     st.success("✅ Payment successful! You now have unlimited access!")
                     st.balloons()
                     st.rerun()
@@ -790,6 +942,22 @@ def show_payment_options():
 # Paywall glow
 if not st.session_state.paid:
     st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
+    st.session_state.user_email = st.text_input("Email (required to receive access reminders)", value=st.session_state.user_email, placeholder="you@example.com")
+    st.session_state.user_wallet = st.text_input("Primary Solana wallet (optional, helps auto-unlock)", value=st.session_state.user_wallet, placeholder="e.g. 9xQeWv...Phantom")
+    st.markdown("#### Already subscribed? Enter your email or wallet to restore access.")
+    st.session_state.subscription_lookup = st.text_input("Email or Solana wallet", value=st.session_state.subscription_lookup, key="lookup_input")
+    col_lookup = st.columns([1, 1])
+    with col_lookup[0]:
+        if st.button("🔁 Check Subscription Status"):
+            identifier = st.session_state.subscription_lookup.strip()
+            success, message = check_subscription_status(identifier)
+            if success:
+                st.session_state.paid = True
+                st.success(message)
+                st.balloons()
+            else:
+                st.warning(message)
+    st.markdown("---")
 
 # Show custom rules section if clicked
 if st.session_state.show_custom_rules:

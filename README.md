@@ -31,6 +31,19 @@ Never Miss Another 10x - Live trading scanner with real charts and tweet-ready s
 2. Make sure `requirements.txt` is up to date
 3. Copy `env.example` to `.env` and fill in your keys
 
+### Step 1.5: Create Supabase table for subscriptions
+1. Create a Supabase project (free tier is fine)
+2. Add table `subscriptions` with columns:
+   - `id` (uuid, default)
+   - `email` (text)
+   - `wallet` (text)
+   - `reference` (text, unique)
+   - `amount` (numeric)
+   - `status` (text)
+   - `paid_at` (timestamp)
+   - `expires_at` (timestamp)
+3. Copy `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, `SUPABASE_ANON_KEY` into `.env`
+
 ### Step 2: Deploy on Render
 
 1. Go to [Render Dashboard](https://dashboard.render.com)
