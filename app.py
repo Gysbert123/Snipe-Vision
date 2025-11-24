@@ -122,158 +122,6 @@ def verify_payment(payment_id, method):
         return False
     return False
 
-# Show payment options
-def show_payment_options():
-    st.markdown("---")
-    st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
-    st.markdown("### 💳 Upgrade to Premium - $5/month")
-    st.markdown("**Unlock unlimited scans, custom rules, and tweet exports**")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 💎 Pay with USDC (Solana)")
-        st.info("Send $5 USDC to our Solana wallet. Instant unlock!")
-        
-        solana_address = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
-        
-        if st.button("💰 Pay with USDC", key="pay_solana", use_container_width=True):
-            st.session_state.payment_method = "solana"
-            st.session_state.payment_pending = True
-            st.session_state.payment_id = f"sol_{int(time.time())}"
-            st.rerun()
-        
-        if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
-            st.markdown("---")
-            st.markdown("### 📱 Payment Instructions")
-            st.markdown(f"**Send exactly $5 USDC to:**")
-            st.code(solana_address, language=None)
-            
-            try:
-                qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                qr.add_data(f"solana:{solana_address}?amount=5&token=USDC")
-                qr.make(fit=True)
-                img_qr = qr.make_image(fill_color="#00ff88", back_color="#0e1117")
-                buf_qr = BytesIO()
-                img_qr.save(buf_qr, format="PNG")
-                buf_qr.seek(0)
-                st.image(buf_qr, width=300)
-            except Exception as e:
-                st.info(f"QR code: {str(e)}")
-            
-            st.markdown("**After sending, click below to verify:**")
-            if st.button("✅ Verify Payment", key="verify_solana"):
-                if verify_payment(st.session_state.payment_id, "solana"):
-                    st.session_state.paid = True
-                    st.session_state.payment_pending = False
-                    st.success("✅ Payment verified! You now have unlimited access!")
-                    st.balloons()
-                    st.rerun()
-                else:
-                    st.warning("Payment not detected yet. Please wait a moment and try again.")
-                    st.info("💡 In production, this is verified automatically via Helius webhook")
-    
-    with col2:
-        st.markdown("### 💳 Pay with PayPal")
-        st.info("Subscribe for $5/month. Cancel anytime!")
-        
-        if st.button("💳 Subscribe with PayPal", key="pay_paypal", use_container_width=True):
-            st.session_state.payment_method = "paypal"
-            st.session_state.payment_pending = True
-            st.session_state.payment_id = f"pp_{int(time.time())}"
-            st.rerun()
-        
-        if st.session_state.payment_method == "paypal" and st.session_state.payment_pending:
-            st.markdown("---")
-            st.markdown("### 🔄 PayPal Subscription")
-            
-            paypal_mode = os.getenv("PAYPAL_MODE", "sandbox")
-            paypal_client_id = os.getenv("PAYPAL_CLIENT_ID", "")
-            
-            if paypal_mode == "sandbox" or not paypal_client_id:
-                st.info("🧪 **Test Mode Active**")
-                st.markdown("Click below to simulate PayPal payment:")
-                if st.button("✅ Simulate PayPal Payment", key="simulate_paypal"):
-                    st.session_state.paid = True
-                    st.session_state.payment_pending = False
-                    st.success("✅ Payment successful! You now have unlimited access!")
-                    st.balloons()
-                    st.rerun()
-            else:
-                st.markdown("Redirecting to PayPal...")
-                st.info("💡 In production, this redirects to PayPal checkout")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("---")
-
-# Paywall glow
-if not st.session_state.paid:
-    st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
-
-# Show custom rules section if clicked
-if st.session_state.show_custom_rules:
-    st.markdown("---")
-    st.markdown("### ⚙️ Custom Rules (Premium Feature)")
-    if not st.session_state.paid:
-        st.warning("🔒 This feature requires a $5/mo subscription. Upgrade below to unlock!")
-        show_payment_options()
-    else:
-        st.success("✅ Premium unlocked! Create your custom trading strategy below.")
-        st.markdown("**Examples:**")
-        st.code("RSI < 30 AND Volume > 2x average\nRSI > 70 AND Volume spike\nEMA50 > EMA200 (Golden Cross)\nRSI < 30 AND Volume > 2x AND Golden Cross", language=None)
-        
-        custom_rule = st.text_area("Enter your trading strategy rules:", 
-                                 placeholder="Example: RSI < 30 AND Volume > 2x average AND Golden Cross",
-                                 height=100)
-        
-        if st.button("🔍 Scan with Custom Rules", use_container_width=True):
-            if custom_rule.strip():
-                with st.spinner("🔍 Scanning market with your custom rules..."):
-                    results, error = scan_with_custom_rules(custom_rule)
-                
-                if error:
-                    st.error(error)
-                elif results:
-                    st.success(f"✅ Found {len(results)} assets matching your custom rules!")
-                    
-                    for r in results:
-                        c1, c2 = st.columns([3, 1])
-                        
-                        with c1:
-                            st.image(r["chart"])
-                        
-                        with c2:
-                            st.metric(r["sym"], f"Score: {r['score']}/100")
-                            st.write("**Signals:**")
-                            for signal in r["signals"]:
-                                st.write(f"• {signal}")
-                            st.markdown(f"**💡 Explanation:** {r['explanation']}")
-                            
-                            # Tweet export
-                            tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
-                            st.code(tweet, language=None)
-                            if st.button("📋 Copy Tweet", key=f"custom_copy_{r['sym']}"):
-                                st.toast("✅ Copied to clipboard!")
-                else:
-                    st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
-            else:
-                st.info("Please enter your custom rules above.")
-    st.markdown("---")
-
-# Show tweet info if clicked
-if st.session_state.show_tweet_info:
-    st.markdown("---")
-    st.markdown("### 🐦 One-Click Post to X")
-    st.info("After running a scan, each result includes a ready-to-post tweet. Just click 'Copy Tweet' and paste it on X (Twitter)!")
-    st.markdown("---")
-
-# Show scanner section if Quick Snipe was clicked
-if st.session_state.show_scanner:
-    st.markdown("---")
-    st.markdown("### 🚀 Quick Snipe Scanner")
-    st.info("Click the button below to scan for the top 10 best setups right now!")
-
-
 def parse_custom_rules(rule_text):
     """Parse custom rules from natural language"""
     rules = []
@@ -429,6 +277,158 @@ def scan_with_custom_rules(custom_rules_text):
             pass
     
     return sorted(results, key=lambda x: x["score"], reverse=True), None
+
+# Show payment options
+def show_payment_options():
+    st.markdown("---")
+    st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
+    st.markdown("### 💳 Upgrade to Premium - $5/month")
+    st.markdown("**Unlock unlimited scans, custom rules, and tweet exports**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 💎 Pay with USDC (Solana)")
+        st.info("Send $5 USDC to our Solana wallet. Instant unlock!")
+        
+        solana_address = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+        
+        if st.button("💰 Pay with USDC", key="pay_solana", use_container_width=True):
+            st.session_state.payment_method = "solana"
+            st.session_state.payment_pending = True
+            st.session_state.payment_id = f"sol_{int(time.time())}"
+            st.rerun()
+        
+        if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
+            st.markdown("---")
+            st.markdown("### 📱 Payment Instructions")
+            st.markdown(f"**Send exactly $5 USDC to:**")
+            st.code(solana_address, language=None)
+            
+            try:
+                qr = qrcode.QRCode(version=1, box_size=10, border=5)
+                qr.add_data(f"solana:{solana_address}?amount=5&token=USDC")
+                qr.make(fit=True)
+                img_qr = qr.make_image(fill_color="#00ff88", back_color="#0e1117")
+                buf_qr = BytesIO()
+                img_qr.save(buf_qr, format="PNG")
+                buf_qr.seek(0)
+                st.image(buf_qr, width=300)
+            except Exception as e:
+                st.info(f"QR code: {str(e)}")
+            
+            st.markdown("**After sending, click below to verify:**")
+            if st.button("✅ Verify Payment", key="verify_solana"):
+                if verify_payment(st.session_state.payment_id, "solana"):
+                    st.session_state.paid = True
+                    st.session_state.payment_pending = False
+                    st.success("✅ Payment verified! You now have unlimited access!")
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.warning("Payment not detected yet. Please wait a moment and try again.")
+                    st.info("💡 In production, this is verified automatically via Helius webhook")
+    
+    with col2:
+        st.markdown("### 💳 Pay with PayPal")
+        st.info("Subscribe for $5/month. Cancel anytime!")
+        
+        if st.button("💳 Subscribe with PayPal", key="pay_paypal", use_container_width=True):
+            st.session_state.payment_method = "paypal"
+            st.session_state.payment_pending = True
+            st.session_state.payment_id = f"pp_{int(time.time())}"
+            st.rerun()
+        
+        if st.session_state.payment_method == "paypal" and st.session_state.payment_pending:
+            st.markdown("---")
+            st.markdown("### 🔄 PayPal Subscription")
+            
+            paypal_mode = os.getenv("PAYPAL_MODE", "sandbox")
+            paypal_client_id = os.getenv("PAYPAL_CLIENT_ID", "")
+            
+            if paypal_mode == "sandbox" or not paypal_client_id:
+                st.info("🧪 **Test Mode Active**")
+                st.markdown("Click below to simulate PayPal payment:")
+                if st.button("✅ Simulate PayPal Payment", key="simulate_paypal"):
+                    st.session_state.paid = True
+                    st.session_state.payment_pending = False
+                    st.success("✅ Payment successful! You now have unlimited access!")
+                    st.balloons()
+                    st.rerun()
+            else:
+                st.markdown("Redirecting to PayPal...")
+                st.info("💡 In production, this redirects to PayPal checkout")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("---")
+
+# Paywall glow
+if not st.session_state.paid:
+    st.markdown("<p class='paywall'>Unlock Custom Rules + Unlimited Exports → $5/mo</p>", unsafe_allow_html=True)
+
+# Show custom rules section if clicked
+if st.session_state.show_custom_rules:
+    st.markdown("---")
+    st.markdown("### ⚙️ Custom Rules (Premium Feature)")
+    if not st.session_state.paid:
+        st.warning("🔒 This feature requires a $5/mo subscription. Upgrade below to unlock!")
+        show_payment_options()
+    else:
+        st.success("✅ Premium unlocked! Create your custom trading strategy below.")
+        st.markdown("**Examples:**")
+        st.code("RSI < 30 AND Volume > 2x average\nRSI > 70 AND Volume spike\nEMA50 > EMA200 (Golden Cross)\nRSI < 30 AND Volume > 2x AND Golden Cross", language=None)
+        
+        custom_rule = st.text_area("Enter your trading strategy rules:", 
+                                 placeholder="Example: RSI < 30 AND Volume > 2x average AND Golden Cross",
+                                 height=100)
+        
+        if st.button("🔍 Scan with Custom Rules", use_container_width=True):
+            if custom_rule.strip():
+                with st.spinner("🔍 Scanning market with your custom rules..."):
+                    results, error = scan_with_custom_rules(custom_rule)
+                
+                if error:
+                    st.error(error)
+                elif results:
+                    st.success(f"✅ Found {len(results)} assets matching your custom rules!")
+                    
+                    for r in results:
+                        c1, c2 = st.columns([3, 1])
+                        
+                        with c1:
+                            st.image(r["chart"])
+                        
+                        with c2:
+                            st.metric(r["sym"], f"Score: {r['score']}/100")
+                            st.write("**Signals:**")
+                            for signal in r["signals"]:
+                                st.write(f"• {signal}")
+                            st.markdown(f"**💡 Explanation:** {r['explanation']}")
+                            
+                            # Tweet export
+                            tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
+                            st.code(tweet, language=None)
+                            if st.button("📋 Copy Tweet", key=f"custom_copy_{r['sym']}"):
+                                st.toast("✅ Copied to clipboard!")
+                else:
+                    st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
+            else:
+                st.info("Please enter your custom rules above.")
+    st.markdown("---")
+
+# Show tweet info if clicked
+if st.session_state.show_tweet_info:
+    st.markdown("---")
+    st.markdown("### 🐦 One-Click Post to X")
+    st.info("After running a scan, each result includes a ready-to-post tweet. Just click 'Copy Tweet' and paste it on X (Twitter)!")
+    st.markdown("---")
+
+# Show scanner section if Quick Snipe was clicked
+if st.session_state.show_scanner:
+    st.markdown("---")
+    st.markdown("### 🚀 Quick Snipe Scanner")
+    st.info("Click the button below to scan for the top 10 best setups right now!")
+
 
 @st.cache_data(ttl=900)
 def scan():
