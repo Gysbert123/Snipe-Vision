@@ -47,7 +47,9 @@ def calculate_all_indicators(df):
             indicators['SuperTrend'] = supertrend.iloc[:, 0] if len(supertrend.columns) > 0 else None
         
         # Momentum Indicators
-        indicators['RSI'] = ta.rsi(df.Close, length=14)
+        rsi = ta.rsi(df.Close, length=14)
+        if rsi is not None:
+            indicators['RSI'] = rsi.fillna(method="bfill")
         stoch = ta.stoch(df.High, df.Low, df.Close)
         if stoch is not None and isinstance(stoch, pd.DataFrame):
             indicators['Stoch_K'] = stoch.iloc[:, 0] if len(stoch.columns) > 0 else None

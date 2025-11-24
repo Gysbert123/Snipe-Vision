@@ -445,9 +445,9 @@ def parse_custom_rules(rule_text):
                         ema_length = int(float(num))
                         break
             if "ABOVE" in part or ">" in part:
-                rules.append(("PRICE_ABOVE_EMA", ema_length, None))
+                rules.append(("PRICE_ABOVE_EMA", ">", ema_length))
             elif "BELOW" in part or "<" in part:
-                rules.append(("PRICE_BELOW_EMA", ema_length, None))
+                rules.append(("PRICE_BELOW_EMA", "<", ema_length))
         
         # PRICE ABOVE/BELOW SMA
         elif ("PRICE" in part and "SMA" in part) or ("ABOVE" in part and "SMA" in part):
@@ -458,9 +458,9 @@ def parse_custom_rules(rule_text):
                         sma_length = int(float(num))
                         break
             if "ABOVE" in part or ">" in part:
-                rules.append(("PRICE_ABOVE_SMA", sma_length, None))
+                rules.append(("PRICE_ABOVE_SMA", ">", sma_length))
             elif "BELOW" in part or "<" in part:
-                rules.append(("PRICE_BELOW_SMA", sma_length, None))
+                rules.append(("PRICE_BELOW_SMA", "<", sma_length))
         
         # RSI
         elif "RSI" in part:
@@ -625,6 +625,59 @@ def parse_custom_rules(rule_text):
     
     return rules
 
+
+def rule_to_label(rule):
+    rule_type, operator, value = rule
+    if rule_type == "PRICE_ABOVE_EMA":
+        return f"Price > EMA{value}"
+    if rule_type == "PRICE_BELOW_EMA":
+        return f"Price < EMA{value}"
+    if rule_type == "PRICE_ABOVE_SMA":
+        return f"Price > SMA{value}"
+    if rule_type == "PRICE_BELOW_SMA":
+        return f"Price < SMA{value}"
+    if rule_type == "RSI":
+        return f"RSI {operator} {value}"
+    if rule_type == "VOLUME":
+        return f"Volume {operator} {value}x avg"
+    if rule_type == "MACD_CROSS":
+        return f"MACD {operator} cross"
+    if rule_type == "EMA_CROSS":
+        return f"{operator.title()} Cross"
+    if rule_type == "BB_TOUCH":
+        return f"Bollinger {operator} touch"
+    if rule_type == "STOCH":
+        return f"Stochastic {operator} {value}"
+    if rule_type == "ADX":
+        return f"ADX {operator} {value}"
+    if rule_type == "ATR":
+        return f"ATR {operator} {value}"
+    if rule_type == "CCI":
+        return f"CCI {operator} {value}"
+    if rule_type == "WILLR":
+        return f"Williams %R {operator} {value}"
+    if rule_type == "OBV_DIVERGENCE":
+        return "OBV divergence"
+    if rule_type == "PRICE_ABOVE_VWAP":
+        return "Price > VWAP"
+    if rule_type == "PRICE_BELOW_VWAP":
+        return "Price < VWAP"
+    if rule_type == "SUPERTREND":
+        return f"SuperTrend {operator}"
+    if rule_type == "PSAR":
+        return f"Parabolic SAR {operator}"
+    if rule_type == "AROON_UP":
+        return f"Aroon Up {operator} {value}"
+    if rule_type == "AROON_DOWN":
+        return f"Aroon Down {operator} {value}"
+    if rule_type == "MFI":
+        return f"MFI {operator} {value}"
+    if rule_type == "ROC":
+        return f"ROC {operator} {value}"
+    if rule_type == "PRICE":
+        return f"Price {operator} {value}"
+    return rule_type
+
 def scan_with_custom_rules(custom_rules_text):
     """Scan market with custom rules - supports 50+ indicators, 5-rule limit"""
     results = []
@@ -635,25 +688,21 @@ def scan_with_custom_rules(custom_rules_text):
     
     # Parse rules
     rules = parse_custom_rules(custom_rules_text)
+    rule_labels = [rule_to_label(r) for r in rules]
+    rule_tally = [0] * len(rules)
+    processed = 0
     
     # Check 5-rule limit
     if len(rules) > 5:
-        return [], f"Maximum 5 rules allowed. You entered {len(rules)} rules. Please reduce to 5 or fewer."
+        return [], f"Maximum 5 rules allowed. You entered {len(rules)} rules. Please reduce to 5 or fewer.", {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": processed}
     
     if not rules:
-        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average AND Price above 200 EMA'"
+        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average AND Price above 200 EMA'", {"rule_labels": [], "rule_tally": [], "total_symbols": processed}
     
     for sym in symbols[:500]:  # Limit to 500 for speed
         try:
             # Download data - use up to 2 years to ensure EMA/indicator coverage
-            df = yf.download(
-                sym,
-                period="2y",
-                interval="1d",
-                progress=False,
-                group_by="column",
-                auto_adjust=False,
-            )
+            df = yf.download(sym, period="2y", interval="1d", progress=False, auto_adjust=False)
             if len(df) < 60:
                 continue
             if isinstance(df.columns, pd.MultiIndex):
@@ -672,7 +721,7 @@ def scan_with_custom_rules(custom_rules_text):
             explanation_parts = []
             
             # Check each rule
-            for rule in rules:
+            for idx, rule in enumerate(rules):
                 rule_type, operator, value = rule
                 matched = False
                 
@@ -957,6 +1006,8 @@ def scan_with_custom_rules(custom_rules_text):
                     pass
                 
                 matches.append(matched)
+                if matched:
+                    rule_tally[idx] += 1
             
             # Only include if ALL rules match
             if all(matches) and len(matches) == len(rules) and len(matches) > 0:
@@ -1004,10 +1055,12 @@ def scan_with_custom_rules(custom_rules_text):
                     "chart": f"data:image/png;base64,{img}",
                     "explanation": explanation
                 })
+            processed += 1
         except Exception as e:
             pass
     
-    return sorted(results, key=lambda x: x["score"], reverse=True), None
+    debug_summary = {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": processed}
+    return sorted(results, key=lambda x: x["score"], reverse=True), None, debug_summary
 
 # Show payment options
 def show_payment_options():
@@ -1225,7 +1278,8 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
         if st.button("🔍 Scan with Custom Rules", use_container_width=True):
             if custom_rule.strip():
                 with st.spinner("🔍 Scanning market with your custom rules..."):
-                    results, error = scan_with_custom_rules(custom_rule)
+                    results, error, debug_info = scan_with_custom_rules(custom_rule)
+                    debug_info = debug_info or {}
                 
                 if error:
                     st.error(error)
@@ -1252,6 +1306,17 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                                 st.toast("✅ Copied to clipboard!")
                 else:
                     st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
+                
+                if debug_info.get("rule_labels"):
+                    st.markdown("#### Rule Coverage Across Universe")
+                    total = debug_info.get("total_symbols", 0)
+                    coverage_cols = st.columns(2)
+                    labels = debug_info.get("rule_labels", [])
+                    tallies = debug_info.get("rule_tally", [])
+                    for i, (label, count) in enumerate(zip(labels, tallies)):
+                        col = coverage_cols[i % 2]
+                        with col:
+                            st.write(f"• **{label}** → {count}/{total} symbols match")
             else:
                 st.info("Please enter your custom rules above.")
     st.markdown("---")
