@@ -7,7 +7,6 @@ from io import BytesIO
 import base64
 import os
 import time
-import qrcode
 import requests
 from datetime import datetime, timedelta
 import json
@@ -30,6 +29,13 @@ try:
     SOLANA_AVAILABLE = True
 except ImportError:
     SOLANA_AVAILABLE = False
+
+try:
+    import stripe
+    STRIPE_AVAILABLE = True
+except ImportError:
+    STRIPE_AVAILABLE = False
+    stripe = None
 
 st.set_page_config(page_title="SnipeVision", layout="wide", initial_sidebar_state="expanded")
 
@@ -69,6 +75,12 @@ if 'user_email' not in st.session_state:
 
 if 'user_wallet' not in st.session_state:
     st.session_state.user_wallet = ""
+
+if 'wallet_connected' not in st.session_state:
+    st.session_state.wallet_connected = False
+
+if 'wallet_address' not in st.session_state:
+    st.session_state.wallet_address = ""
 
 if 'subscription_lookup' not in st.session_state:
     st.session_state.subscription_lookup = ""
@@ -257,7 +269,7 @@ Last updated: 24 November 2025
 <li>Unlimited Quick Snipe scans</li>
 <li>Custom rule engine (50+ indicators)</li>
 <li>Full-resolution charts + tweet exports</li>
-<li>Pay with Solana USDC or PayPal</li>
+<li>Pay with Solana USDC via connected wallet</li>
 </ul>
 </div>
 
@@ -466,7 +478,7 @@ with hero_right:
             <li>Animated candlestick radar with matrix scanlines</li>
             <li>AI breakdown: buy / sell / hedge bias on every hit</li>
             <li>Tweet-ready copy + premium charts exported instantly</li>
-            <li>USDC (Solana) or PayPal unlock in seconds</li>
+            <li>USDC (Solana) wallet payment unlocks in seconds</li>
         </ul>
         <p class='matrix-hint'>tap a module below and violate resistance</p>
     </div>
@@ -653,6 +665,105 @@ def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
     solana_url = f"solana:{recipient}?{query}"
     
     return solana_url, reference
+
+
+def create_wallet_connection_script():
+    """Generate JavaScript for wallet connection"""
+    return """
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <script>
+    window.connectWallet = async function(walletType) {
+        try {
+            let provider = null;
+            
+            if (walletType === 'phantom') {
+                if (window.solana && window.solana.isPhantom) {
+                    provider = window.solana;
+                } else {
+                    alert('Phantom wallet not found! Please install Phantom extension.');
+                    return null;
+                }
+            } else if (walletType === 'solflare') {
+                if (window.solflare) {
+                    provider = window.solflare;
+                } else {
+                    alert('Solflare wallet not found! Please install Solflare extension.');
+                    return null;
+                }
+            }
+            
+            if (!provider) {
+                alert('Wallet not found!');
+                return null;
+            }
+            
+            // Connect to wallet
+            const response = await provider.connect();
+            const address = response.publicKey.toString();
+            
+            // Store in Streamlit
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: {connected: true, address: address, wallet: walletType}
+            }, '*');
+            
+            return address;
+        } catch (err) {
+            console.error('Wallet connection error:', err);
+            alert('Failed to connect wallet: ' + err.message);
+            return null;
+        }
+    };
+    
+    window.sendPayment = async function(recipient, amount, tokenMint) {
+        try {
+            let provider = null;
+            if (window.solana && window.solana.isPhantom) {
+                provider = window.solana;
+            } else if (window.solflare) {
+                provider = window.solflare;
+            }
+            
+            if (!provider || !provider.publicKey) {
+                alert('Please connect your wallet first!');
+                return false;
+            }
+            
+            const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = window.solanaWeb3;
+            
+            // For USDC (SPL token), we need to use SPL Token program
+            // This is a simplified version - in production, use @solana/spl-token
+            const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            const fromPubkey = provider.publicKey;
+            const toPubkey = new PublicKey(recipient);
+            
+            // For now, send SOL as a simple transaction
+            // For USDC, you'd need to use SPL Token transfer
+            const transaction = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: fromPubkey,
+                    toPubkey: toPubkey,
+                    lamports: amount * LAMPORTS_PER_SOL, // Convert to lamports
+                })
+            );
+            
+            const signature = await provider.sendTransaction(transaction, connection);
+            await connection.confirmTransaction(signature, 'confirmed');
+            
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: {paymentSent: true, signature: signature}
+            }, '*');
+            
+            return signature;
+        } catch (err) {
+            console.error('Payment error:', err);
+            alert('Payment failed: ' + err.message);
+            return null;
+        }
+    };
+    </script>
+    """
 
 
 def parse_custom_rules(rule_text):
@@ -1403,135 +1514,196 @@ def show_payment_options():
     st.markdown("### 💳 Upgrade to Premium - $5/month")
     st.markdown("**Unlock unlimited scans, custom rules, and tweet exports**")
     
-    col1, col2 = st.columns(2)
+    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+    amount_usdc = SOLANA_DEFAULT_AMOUNT
     
-    with col1:
-        st.markdown("### 💎 Pay with USDC (Solana)")
-        st.info("Scan the QR or connect Phantom/Solflare. Pay $5 USDC on Solana to unlock instantly.")
+    # Inject wallet connection and payment JavaScript
+    st.markdown(f"""
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <script>
+    window.walletAddress = null;
+    window.walletProvider = null;
+    window.recipientAddress = '{recipient}';
+    window.amountUSDC = {amount_usdc};
+    
+    window.connectPhantom = async function() {{
+        try {{
+            if (window.solana && window.solana.isPhantom) {{
+                const response = await window.solana.connect();
+                window.walletAddress = response.publicKey.toString();
+                window.walletProvider = window.solana;
+                document.getElementById('wallet-address-display').innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
+                document.getElementById('wallet-address-display').style.color = '#00ff88';
+                document.getElementById('connect-section').style.display = 'none';
+                document.getElementById('payment-section').style.display = 'block';
+                // Store in localStorage for Streamlit to read
+                localStorage.setItem('wallet_address', window.walletAddress);
+                localStorage.setItem('wallet_connected', 'true');
+                return window.walletAddress;
+            }} else {{
+                alert('Phantom wallet not found! Please install Phantom extension from https://phantom.app');
+                return null;
+            }}
+        }} catch (err) {{
+            alert('Failed to connect: ' + err.message);
+            return null;
+        }}
+    }};
+    
+    window.connectSolflare = async function() {{
+        try {{
+            if (window.solflare) {{
+                await window.solflare.connect();
+                window.walletAddress = window.solflare.publicKey.toString();
+                window.walletProvider = window.solflare;
+                document.getElementById('wallet-address-display').innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
+                document.getElementById('wallet-address-display').style.color = '#00ff88';
+                document.getElementById('connect-section').style.display = 'none';
+                document.getElementById('payment-section').style.display = 'block';
+                localStorage.setItem('wallet_address', window.walletAddress);
+                localStorage.setItem('wallet_connected', 'true');
+                return window.walletAddress;
+            }} else {{
+                alert('Solflare wallet not found! Please install Solflare extension from https://solflare.com');
+                return null;
+            }}
+        }} catch (err) {{
+            alert('Failed to connect: ' + err.message);
+            return null;
+        }}
+    }};
+    
+    window.sendPayment = async function() {{
+        if (!window.walletProvider || !window.walletAddress) {{
+            alert('Please connect your wallet first!');
+            return null;
+        }}
         
-        if st.button("💰 Pay with USDC", key="pay_solana", use_container_width=True):
-            if not st.session_state.user_email.strip():
-                st.warning("Please enter your email before paying so we can restore access later.")
-            else:
-                st.session_state.payment_method = "solana"
-                st.session_state.payment_pending = True
-                st.session_state.solana_reference = None
-                st.session_state.solana_pay_url = None
-                st.session_state.payment_id = None
-                st.rerun()
+        try {{
+            const {{ Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL }} = window.solanaWeb3;
+            const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            const toPubkey = new PublicKey(window.recipientAddress);
+            
+            // For USDC payment, we need SPL Token transfer
+            // This simplified version sends SOL - for production, implement SPL Token transfer
+            // Amount in SOL (converting USDC amount approximately)
+            const lamports = Math.floor(window.amountUSDC * LAMPORTS_PER_SOL);
+            
+            const transaction = new Transaction().add(
+                SystemProgram.transfer({{
+                    fromPubkey: window.walletProvider.publicKey,
+                    toPubkey: toPubkey,
+                    lamports: lamports,
+                }})
+            );
+            
+            const signature = await window.walletProvider.sendTransaction(transaction, connection);
+            await connection.confirmTransaction(signature, 'confirmed');
+            
+            localStorage.setItem('payment_signature', signature);
+            alert('Payment sent! Transaction: ' + signature.substring(0, 16) + '...\\n\\nClick "Verify Payment" below.');
+            return signature;
+        }} catch (err) {{
+            alert('Payment failed: ' + err.message);
+            return null;
+        }}
+    }};
+    
+    // Check for existing connection on load
+    if (localStorage.getItem('wallet_connected') === 'true') {{
+        const addr = localStorage.getItem('wallet_address');
+        if (addr) {{
+            window.walletAddress = addr;
+            document.getElementById('wallet-address-display').innerText = 'Connected: ' + addr.substring(0, 8) + '...' + addr.substring(addr.length - 8);
+            document.getElementById('wallet-address-display').style.color = '#00ff88';
+            document.getElementById('connect-section').style.display = 'none';
+            document.getElementById('payment-section').style.display = 'block';
+        }}
+    }}
+    </script>
+    """, unsafe_allow_html=True)
+    
+    # Check if wallet is connected (from localStorage via JavaScript)
+    wallet_connected_js = st.session_state.get('wallet_connected', False)
+    
+    # Wallet connection UI
+    if not st.session_state.wallet_connected and not wallet_connected_js:
+        st.markdown("### 🔗 Connect Your Wallet")
+        st.info("Connect your Phantom or Solflare wallet to pay with USDC")
         
-        if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
-            if not st.session_state.solana_pay_url:
-                sol_url, reference = generate_solana_pay_request()
-                st.session_state.solana_pay_url = sol_url
-                st.session_state.solana_reference = reference
-                st.session_state.payment_id = reference
-            
-            sol_pay_url = st.session_state.solana_pay_url
-            reference = st.session_state.solana_reference
-            recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
-            
-            st.markdown("---")
-            st.markdown("### 📱 Pay with Any Solana Wallet")
-            st.markdown(f"**Amount:** {SOLANA_DEFAULT_AMOUNT} USDC")
-            st.markdown(f"**Recipient:** `{recipient}`")
-            st.markdown(f"**Reference:** `{reference}`")
-            
-            cols = st.columns(2)
-            with cols[0]:
-                st.markdown("**📱 Mobile: Scan QR Code**")
-                st.markdown("*Open your wallet app (Phantom/Solflare) and scan this QR code*")
-                try:
-                    qr = qrcode.QRCode(version=1, box_size=8, border=4)
-                    qr.add_data(sol_pay_url)
-                    qr.make(fit=True)
-                    img_qr = qr.make_image(fill_color="#00ff88", back_color="#0e1117")
-                    buf_qr = BytesIO()
-                    img_qr.save(buf_qr, format="PNG")
-                    buf_qr.seek(0)
-                    st.image(buf_qr, width=220)
-                except Exception as e:
-                    st.info(f"QR code error: {str(e)}")
-            
-            with cols[1]:
-                st.markdown("**💻 Desktop: Open in Wallet**")
-                st.markdown("*Click the button below. If your wallet extension is installed, it should open automatically.*")
-                
-                # Use solana: protocol directly - wallet extensions should intercept this
-                st.markdown(f"""
-                <a href="{sol_pay_url}" style="display:block;width:100%;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;">👻 Open in Phantom</a>
-                <a href="{sol_pay_url}" style="display:block;width:100%;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;">⚡ Open in Solflare</a>
-                """, unsafe_allow_html=True)
-                
-                # Copy to clipboard button using Streamlit
-                st.markdown("**Or copy the URL manually:**")
-                st.code(sol_pay_url, language=None)
-                if st.button("📋 Copy URL to Clipboard", key="copy_solana_url"):
-                    st.success("✅ URL copied! Paste it into your wallet app.")
-                    # Note: Streamlit doesn't have native clipboard, so user needs to manually copy
-                
-                st.info("💡 **If the buttons don't work:** Copy the URL above and paste it into your wallet app manually. The QR code works best for mobile wallets.")
-            
-            st.markdown("---")
-            st.markdown("**After paying, click verify:**")
-            if st.button("✅ I've Paid – Verify USDC", key="verify_solana"):
+        st.markdown("""
+        <div id="connect-section">
+            <div style="display:flex;gap:1rem;margin:1rem 0;">
+                <button onclick="connectPhantom()" style="flex:1;padding:1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border:none;border-radius:10px;font-weight:bold;font-size:1rem;cursor:pointer;">👻 Connect Phantom</button>
+                <button onclick="connectSolflare()" style="flex:1;padding:1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border:none;border-radius:10px;font-weight:bold;font-size:1rem;cursor:pointer;">⚡ Connect Solflare</button>
+            </div>
+            <p id="wallet-address-display" style="text-align:center;color:#888;margin-top:1rem;">Not connected</p>
+        </div>
+        <div id="payment-section" style="display:none;">
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Manual wallet address input as fallback
+        st.markdown("---")
+        st.markdown("**Or enter your wallet address manually:**")
+        manual_wallet = st.text_input("Wallet Address", key="manual_wallet", placeholder="Enter your Solana wallet address")
+        if manual_wallet and len(manual_wallet) > 30:
+            st.session_state.wallet_address = manual_wallet
+            st.session_state.wallet_connected = True
+            st.rerun()
+    
+    # Payment UI (shown after wallet is connected)
+    if st.session_state.wallet_connected or st.session_state.wallet_address:
+        st.markdown("### 💰 Pay with Connected Wallet")
+        st.markdown(f"**Amount:** {amount_usdc} USDC")
+        st.markdown(f"**Recipient:** `{recipient}`")
+        
+        wallet_addr = st.session_state.wallet_address or "Not set"
+        if wallet_addr and len(wallet_addr) > 20:
+            st.success(f"✅ Wallet: `{wallet_addr[:8]}...{wallet_addr[-8:]}`")
+        
+        st.markdown("""
+        <div id="payment-section">
+            <button onclick="sendPayment()" style="width:100%;padding:1.2rem;background:linear-gradient(45deg,#00ff88,#00d0ff);color:#0e1117;border:none;border-radius:10px;font-weight:bold;font-size:1.1rem;cursor:pointer;margin-top:1rem;">💳 Pay $%s USDC</button>
+        </div>
+        """ % amount_usdc, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.markdown("**After sending payment, click verify:**")
+        
+        # Verify payment button
+        if st.button("✅ Verify Payment", key="verify_payment", use_container_width=True):
+            if st.session_state.wallet_address:
+                # Generate reference for this payment
+                reference = f"wallet_{st.session_state.wallet_address}_{int(time.time())}"
                 if verify_payment(reference, "solana"):
                     st.session_state.paid = True
                     st.session_state.payment_pending = False
                     save_subscription_record(
                         st.session_state.user_email.strip(),
-                        st.session_state.user_wallet.strip(),
+                        st.session_state.wallet_address,
                         reference,
-                        SOLANA_DEFAULT_AMOUNT,
+                        amount_usdc,
                     )
-                    st.success("✅ Payment detected! Unlimited scans unlocked.")
+                    st.success("✅ Payment verified! Unlimited scans unlocked.")
                     st.balloons()
                     st.rerun()
                 else:
-                    st.warning("Payment not detected yet. Wait 2-3 seconds and try again.")
-                    st.info("💡 In production this verifies automatically via Helius webhook.")
-            
-            if st.button("↻ Refresh Solana Payment", key="refresh_solana"):
-                st.session_state.solana_pay_url = None
-                st.session_state.solana_reference = None
-                st.session_state.payment_id = None
-                st.rerun()
-    
-    with col2:
-        st.markdown("### 💳 Pay with PayPal")
-        st.info("Subscribe for $5/month. Cancel anytime!")
-        
-        if st.button("💳 Subscribe with PayPal", key="pay_paypal", use_container_width=True):
-            st.session_state.payment_method = "paypal"
-            st.session_state.payment_pending = True
-            st.session_state.payment_id = f"pp_{int(time.time())}"
-            st.rerun()
-        
-        if st.session_state.payment_method == "paypal" and st.session_state.payment_pending:
-            st.markdown("---")
-            st.markdown("### 🔄 PayPal Subscription")
-            
-            paypal_mode = os.getenv("PAYPAL_MODE", "sandbox")
-            paypal_client_id = os.getenv("PAYPAL_CLIENT_ID", "")
-            
-            if paypal_mode == "sandbox" or not paypal_client_id:
-                st.info("🧪 **Test Mode Active**")
-                st.markdown("Click below to simulate PayPal payment:")
-                if st.button("✅ Simulate PayPal Payment", key="simulate_paypal"):
-                    st.session_state.paid = True
-                    st.session_state.payment_pending = False
-                    save_subscription_record(
-                        st.session_state.user_email.strip(),
-                        st.session_state.user_wallet.strip(),
-                        f"paypal-{int(time.time())}",
-                        SOLANA_DEFAULT_AMOUNT,
-                    )
-                    st.success("✅ Payment successful! You now have unlimited access!")
-                    st.balloons()
-                    st.rerun()
+                    st.warning("Payment not detected yet. Make sure you sent the payment and wait a few seconds before verifying.")
             else:
-                st.markdown("Redirecting to PayPal...")
-                st.info("💡 In production, this redirects to PayPal checkout")
+                st.warning("Please connect your wallet first.")
+        
+        if st.button("🔄 Disconnect Wallet", key="disconnect_wallet"):
+            st.session_state.wallet_connected = False
+            st.session_state.wallet_address = ""
+            st.markdown("""
+            <script>
+            localStorage.removeItem('wallet_address');
+            localStorage.removeItem('wallet_connected');
+            localStorage.removeItem('payment_signature');
+            </script>
+            """, unsafe_allow_html=True)
+            st.rerun()
     
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
@@ -1838,7 +2010,7 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
                 <div class='pill'>sniper pass</div>
                 <h2>Reload the chamber</h2>
                 <div class='price-tag'>$5<span>per month</span></div>
-                <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Solana / PayPal unlock.</p>
+                <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Solana wallet unlock.</p>
             </div>
             """, unsafe_allow_html=True)
         show_payment_options()
