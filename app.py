@@ -64,6 +64,12 @@ if 'solana_reference' not in st.session_state:
 if 'solana_pay_url' not in st.session_state:
     st.session_state.solana_pay_url = None
 
+if 'phantom_url' not in st.session_state:
+    st.session_state.phantom_url = None
+
+if 'solflare_url' not in st.session_state:
+    st.session_state.solflare_url = None
+
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 
@@ -628,7 +634,7 @@ def increment_free_scan_count(email):
 
 
 def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
-    """Generate Solana Pay transaction request URL + reference"""
+    """Generate Solana Pay transaction request URL + reference + wallet deep links"""
     recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
     label = "SnipeVision Premium"
     message = "Unlock unlimited scans"
@@ -651,7 +657,13 @@ def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
 
     query = urlencode(params)
     solana_url = f"solana:{recipient}?{query}"
-    return solana_url, reference
+    
+    # Generate wallet-specific deep links (URL-safe base64 encoded, no padding)
+    solana_url_encoded = base64.urlsafe_b64encode(solana_url.encode()).decode().rstrip('=')
+    phantom_url = f"https://phantom.app/ul/v1/{solana_url_encoded}"
+    solflare_url = f"https://solflare.com/ul/v1/{solana_url_encoded}"
+    
+    return solana_url, reference, phantom_url, solflare_url
 
 
 def parse_custom_rules(rule_text):
@@ -1416,17 +1428,23 @@ def show_payment_options():
                 st.session_state.payment_pending = True
                 st.session_state.solana_reference = None
                 st.session_state.solana_pay_url = None
+                st.session_state.phantom_url = None
+                st.session_state.solflare_url = None
                 st.session_state.payment_id = None
                 st.rerun()
         
         if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
             if not st.session_state.solana_pay_url:
-                sol_url, reference = generate_solana_pay_request()
+                sol_url, reference, phantom_url, solflare_url = generate_solana_pay_request()
                 st.session_state.solana_pay_url = sol_url
+                st.session_state.phantom_url = phantom_url
+                st.session_state.solflare_url = solflare_url
                 st.session_state.solana_reference = reference
                 st.session_state.payment_id = reference
             
             sol_pay_url = st.session_state.solana_pay_url
+            phantom_url = st.session_state.phantom_url
+            solflare_url = st.session_state.solflare_url
             reference = st.session_state.solana_reference
             recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
             
@@ -1453,8 +1471,9 @@ def show_payment_options():
             
             with cols[1]:
                 st.markdown("**Desktop Wallet:**")
-                st.write("1. Click the button below\n2. Phantom/Solflare will open with the payment pre-filled\n3. Approve to unlock instantly")
-                st.markdown(f"<a class='sol-pay-link' href='{sol_pay_url}' target='_blank' style='display:inline-block;padding:0.9rem 1.2rem;background:linear-gradient(45deg,#9945FF,#14F195);color:white;border-radius:10px;text-decoration:none;font-weight:bold;'>🔗 Open in Phantom / Solflare</a>", unsafe_allow_html=True)
+                st.write("1. Click your wallet button below\n2. Your wallet will open with the payment pre-filled\n3. Approve to unlock instantly")
+                st.markdown(f"<a class='sol-pay-link' href='{phantom_url}' target='_blank' style='display:block;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;'>👻 Open in Phantom</a>", unsafe_allow_html=True)
+                st.markdown(f"<a class='sol-pay-link' href='{solflare_url}' target='_blank' style='display:block;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border-radius:10px;text-decoration:none;font-weight:bold;text-align:center;'>⚡ Open in Solflare</a>", unsafe_allow_html=True)
             
             st.markdown("**After paying, click verify:**")
             if st.button("✅ I've Paid – Verify USDC", key="verify_solana"):
@@ -1476,6 +1495,8 @@ def show_payment_options():
             
             if st.button("↻ Refresh Solana Payment", key="refresh_solana"):
                 st.session_state.solana_pay_url = None
+                st.session_state.phantom_url = None
+                st.session_state.solflare_url = None
                 st.session_state.solana_reference = None
                 st.session_state.payment_id = None
                 st.rerun()
