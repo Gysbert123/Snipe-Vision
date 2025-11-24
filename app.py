@@ -613,9 +613,19 @@ def scan_with_custom_rules(custom_rules_text):
     for sym in symbols[:500]:  # Limit to 500 for speed
         try:
             # Download data - use up to 2 years to ensure EMA/indicator coverage
-            df = yf.download(sym, period="2y", interval="1d", progress=False)
+            df = yf.download(
+                sym,
+                period="2y",
+                interval="1d",
+                progress=False,
+                group_by="column",
+                auto_adjust=False,
+            )
             if len(df) < 60:
                 continue
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.droplevel(1)
+            df = df.dropna(subset=["Close", "High", "Low", "Volume"])
             
             # Calculate all indicators
             indicators = calculate_all_indicators(df)
