@@ -125,24 +125,51 @@ def verify_payment(payment_id, method):
 def parse_custom_rules(rule_text):
     """Parse custom rules from natural language"""
     rules = []
+    original_text = rule_text
     rule_text = rule_text.upper()
     
-    # RSI rules
+    # Price above EMA rules (check this FIRST before generic price rules)
+    if ("PRICE" in rule_text and "EMA" in rule_text) or ("ABOVE" in rule_text and "EMA" in rule_text):
+        if "200" in rule_text or "EMA200" in rule_text:
+            if "ABOVE" in rule_text or ">" in rule_text:
+                rules.append(("PRICE_ABOVE_EMA", 200, None))
+        elif "50" in rule_text or "EMA50" in rule_text:
+            if "ABOVE" in rule_text or ">" in rule_text:
+                rules.append(("PRICE_ABOVE_EMA", 50, None))
+        elif "EMA" in rule_text:
+            # Default to 200 EMA if not specified
+            if "ABOVE" in rule_text or ">" in rule_text:
+                rules.append(("PRICE_ABOVE_EMA", 200, None))
+    
+    # Price below EMA rules
+    if ("PRICE" in rule_text and "EMA" in rule_text) or ("BELOW" in rule_text and "EMA" in rule_text):
+        if "200" in rule_text or "EMA200" in rule_text:
+            if "BELOW" in rule_text or "<" in rule_text:
+                rules.append(("PRICE_BELOW_EMA", 200, None))
+        elif "50" in rule_text or "EMA50" in rule_text:
+            if "BELOW" in rule_text or "<" in rule_text:
+                rules.append(("PRICE_BELOW_EMA", 50, None))
+    
+    # RSI rules - improved parsing
     if "RSI" in rule_text:
-        if "RSI <" in rule_text or "RSI BELOW" in rule_text:
-            try:
-                value = float([x for x in rule_text.split() if x.replace(".", "").isdigit()][0])
+        # Extract RSI value more reliably
+        import re
+        rsi_matches = re.findall(r'RSI\s*[<>]\s*(\d+(?:\.\d+)?)', rule_text)
+        if rsi_matches:
+            value = float(rsi_matches[0])
+            if "<" in rule_text or "BELOW" in rule_text:
                 rules.append(("RSI", "<", value))
-            except:
-                if "30" in rule_text:
-                    rules.append(("RSI", "<", 30))
-        elif "RSI >" in rule_text or "RSI ABOVE" in rule_text:
-            try:
-                value = float([x for x in rule_text.split() if x.replace(".", "").isdigit()][0])
+            elif ">" in rule_text or "ABOVE" in rule_text:
                 rules.append(("RSI", ">", value))
-            except:
-                if "70" in rule_text:
-                    rules.append(("RSI", ">", 70))
+        else:
+            # Fallback to simple number extraction
+            numbers = re.findall(r'\d+(?:\.\d+)?', rule_text)
+            if numbers:
+                value = float(numbers[0])
+                if "<" in rule_text or "BELOW" in rule_text:
+                    rules.append(("RSI", "<", value))
+                elif ">" in rule_text or "ABOVE" in rule_text:
+                    rules.append(("RSI", ">", value))
     
     # Volume rules
     if "VOLUME" in rule_text:
@@ -154,20 +181,24 @@ def parse_custom_rules(rule_text):
             else:
                 rules.append(("VOLUME", ">", 2.0))  # Default 2x
     
-    # EMA rules
+    # EMA cross rules
     if "EMA50" in rule_text and "EMA200" in rule_text:
         if "EMA50 > EMA200" in rule_text or "GOLDEN CROSS" in rule_text:
             rules.append(("EMA_CROSS", "GOLDEN", None))
         elif "EMA50 < EMA200" in rule_text or "DEATH CROSS" in rule_text:
             rules.append(("EMA_CROSS", "DEATH", None))
     
-    # Price rules
-    if "PRICE >" in rule_text or "PRICE ABOVE" in rule_text:
-        try:
-            value = float([x for x in rule_text.split() if x.replace(".", "").replace("$", "").isdigit()][0])
-            rules.append(("PRICE", ">", value))
-        except:
-            pass
+    # Generic price rules (dollar amount) - only if not already matched EMA rule
+    if not any(r[0] in ["PRICE_ABOVE_EMA", "PRICE_BELOW_EMA"] for r in rules):
+        if "PRICE >" in rule_text or ("PRICE ABOVE" in rule_text and "EMA" not in rule_text):
+            try:
+                import re
+                price_matches = re.findall(r'\$?(\d+(?:\.\d+)?)', rule_text)
+                if price_matches:
+                    value = float(price_matches[0])
+                    rules.append(("PRICE", ">", value))
+            except:
+                pass
     
     return rules
 
@@ -239,6 +270,26 @@ def scan_with_custom_rules(custom_rules_text):
                         score += 35
                         signals.append("Death Cross")
                         explanation_parts.append("EMA50 just crossed below EMA200 (bearish)")
+                    else:
+                        matches.append(False)
+                
+                elif rule_type == "PRICE_ABOVE_EMA":
+                    ema_value = df[f"EMA{value}"].iloc[-1] if f"EMA{value}" in df.columns else None
+                    if ema_value is not None and latest.Close > ema_value:
+                        matches.append(True)
+                        score += 30
+                        signals.append(f"Price above EMA{value}")
+                        explanation_parts.append(f"Price ${latest.Close:.2f} is above EMA{value} (${ema_value:.2f}) - bullish trend")
+                    else:
+                        matches.append(False)
+                
+                elif rule_type == "PRICE_BELOW_EMA":
+                    ema_value = df[f"EMA{value}"].iloc[-1] if f"EMA{value}" in df.columns else None
+                    if ema_value is not None and latest.Close < ema_value:
+                        matches.append(True)
+                        score += 30
+                        signals.append(f"Price below EMA{value}")
+                        explanation_parts.append(f"Price ${latest.Close:.2f} is below EMA{value} (${ema_value:.2f}) - bearish trend")
                     else:
                         matches.append(False)
                 
