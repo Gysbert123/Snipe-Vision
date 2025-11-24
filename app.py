@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
-import base64
 from io import BytesIO
 import os
 import time
@@ -282,6 +281,9 @@ handle_static_routes()
 # Custom CSS — dark, sexy, crypto-native
 st.markdown("""
 <style>
+    header[data-testid="stHeader"], div[data-testid="stToolbar"] {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+    .stApp header {height: 0 !important;}
     .big-title {font-size: 4.5rem !important; font-weight: 900; background: linear-gradient(90deg, #00ff88, #00d0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;}
     .subtitle {font-size: 1.8rem; color: #00ff88; margin-bottom: 2rem;}
     .feature-box {background: rgba(0, 255, 136, 0.1); border-left: 5px solid #00ff88; padding: 1.5rem; border-radius: 10px; margin: 1rem 0;}
@@ -294,13 +296,13 @@ st.markdown("""
     .paypal-button {background: linear-gradient(45deg, #0070ba, #009cde) !important; color: white !important;}
     .chart-container {border: 2px solid #00ff88; border-radius: 15px; padding: 10px; background: #111;}
     .scan-counter {font-size: 1.5rem; color: #00ff88; text-align: center; padding: 1rem; background: rgba(0, 255, 136, 0.1); border-radius: 10px; margin: 1rem 0;}
-.nav-menu {position: fixed; top: 1rem; right: 1.5rem; z-index: 1000;}
-.nav-menu summary {list-style: none; cursor: pointer; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(0, 255, 136, 0.6); color: #00ff88; font-size: 1.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; box-shadow: 0 0 15px rgba(0,255,136,0.3);}
-.nav-menu summary::-webkit-details-marker {display: none;}
-.nav-menu[open] summary {background: linear-gradient(45deg, #00ff88, #00d0ff); color: #0e1117;}
-.nav-menu .nav-links {margin-top: 0.5rem; background: rgba(14, 17, 23, 0.95); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 0.5rem 0; min-width: 220px; backdrop-filter: blur(6px);}
-.nav-menu .nav-links a {display: block; padding: 0.6rem 1rem; color: #e6f8ff; text-decoration: none; font-size: 0.95rem;}
-.nav-menu .nav-links a:hover {background: rgba(0,255,136,0.12); color: #00ff88;}
+    .nav-menu {position: fixed; top: 1rem; right: 1.5rem; z-index: 1000;}
+    .nav-menu summary {list-style: none; cursor: pointer; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(0, 255, 136, 0.6); color: #00ff88; font-size: 1.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; box-shadow: 0 0 15px rgba(0,255,136,0.3);}
+    .nav-menu summary::-webkit-details-marker {display: none;}
+    .nav-menu[open] summary {background: linear-gradient(45deg, #00ff88, #00d0ff); color: #0e1117;}
+    .nav-menu .nav-links {margin-top: 0.5rem; background: rgba(14, 17, 23, 0.95); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 0.5rem 0; min-width: 220px; backdrop-filter: blur(6px);}
+    .nav-menu .nav-links a {display: block; padding: 0.6rem 1rem; color: #e6f8ff; text-decoration: none; font-size: 0.95rem;}
+    .nav-menu .nav-links a:hover {background: rgba(0,255,136,0.12); color: #00ff88;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1114,17 +1116,14 @@ def scan_with_custom_rules(custom_rules_text):
                     xaxis_rangeslider_visible=False
                 )
                 
-                buf = BytesIO()
-                fig.write_image(buf, format="png")
-                img = base64.b64encode(buf.getvalue()).decode()
-                
+                figure_dict = fig.to_dict()
                 explanation = " | ".join(explanation_parts) if explanation_parts else "Matches all your custom rules"
                 
                 results.append({
                     "sym": sym.replace("-USD",""),
                     "score": score,
                     "signals": signals,
-                    "chart": f"data:image/png;base64,{img}",
+                    "figure": figure_dict,
                     "explanation": explanation
                 })
             processed += 1
@@ -1362,7 +1361,11 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                         c1, c2 = st.columns([3, 1])
                         
                         with c1:
-                            st.image(r["chart"])
+                            fig_obj = r.get("figure")
+                            if isinstance(fig_obj, dict):
+                                fig_obj = go.Figure(fig_obj)
+                            if fig_obj is not None:
+                                st.plotly_chart(fig_obj, use_container_width=True)
                         
                         with c2:
                             st.metric(r["sym"], f"Score: {r['score']}/100")
@@ -1442,11 +1445,12 @@ def scan():
                 fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Score {score}/100", 
                                 template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
                 
-                buf = BytesIO()
-                fig.write_image(buf, format="png")
-                img = base64.b64encode(buf.getvalue()).decode()
-                
-                results.append({"sym":sym.replace("-USD",""),"score":score,"signals":signals,"chart":f"data:image/png;base64,{img}"})
+                results.append({
+                    "sym": sym.replace("-USD",""),
+                    "score": score,
+                    "signals": signals,
+                    "figure": fig.to_dict(),
+                })
         except: 
             pass
     
@@ -1482,7 +1486,11 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
             c1, c2 = st.columns([3, 1])
             
             with c1: 
-                st.image(r["chart"])
+                fig_obj = r.get("figure")
+                if isinstance(fig_obj, dict):
+                    fig_obj = go.Figure(fig_obj)
+                if fig_obj is not None:
+                    st.plotly_chart(fig_obj, use_container_width=True)
             
             with c2:
                 st.metric(r["sym"], f"{r['score']}/100")
