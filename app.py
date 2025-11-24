@@ -64,12 +64,6 @@ if 'solana_reference' not in st.session_state:
 if 'solana_pay_url' not in st.session_state:
     st.session_state.solana_pay_url = None
 
-if 'phantom_url' not in st.session_state:
-    st.session_state.phantom_url = None
-
-if 'solflare_url' not in st.session_state:
-    st.session_state.solflare_url = None
-
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 
@@ -634,7 +628,7 @@ def increment_free_scan_count(email):
 
 
 def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
-    """Generate Solana Pay transaction request URL + reference + wallet deep links"""
+    """Generate Solana Pay transaction request URL + reference"""
     recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
     label = "SnipeVision Premium"
     message = "Unlock unlimited scans"
@@ -658,12 +652,7 @@ def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
     query = urlencode(params)
     solana_url = f"solana:{recipient}?{query}"
     
-    # Generate wallet-specific deep links (URL-safe base64 encoded, no padding)
-    solana_url_encoded = base64.urlsafe_b64encode(solana_url.encode()).decode().rstrip('=')
-    phantom_url = f"https://phantom.app/ul/v1/{solana_url_encoded}"
-    solflare_url = f"https://solflare.com/ul/v1/{solana_url_encoded}"
-    
-    return solana_url, reference, phantom_url, solflare_url
+    return solana_url, reference
 
 
 def parse_custom_rules(rule_text):
@@ -1428,23 +1417,17 @@ def show_payment_options():
                 st.session_state.payment_pending = True
                 st.session_state.solana_reference = None
                 st.session_state.solana_pay_url = None
-                st.session_state.phantom_url = None
-                st.session_state.solflare_url = None
                 st.session_state.payment_id = None
                 st.rerun()
         
         if st.session_state.payment_method == "solana" and st.session_state.payment_pending:
             if not st.session_state.solana_pay_url:
-                sol_url, reference, phantom_url, solflare_url = generate_solana_pay_request()
+                sol_url, reference = generate_solana_pay_request()
                 st.session_state.solana_pay_url = sol_url
-                st.session_state.phantom_url = phantom_url
-                st.session_state.solflare_url = solflare_url
                 st.session_state.solana_reference = reference
                 st.session_state.payment_id = reference
             
             sol_pay_url = st.session_state.solana_pay_url
-            phantom_url = st.session_state.phantom_url
-            solflare_url = st.session_state.solflare_url
             reference = st.session_state.solana_reference
             recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
             
@@ -1456,7 +1439,8 @@ def show_payment_options():
             
             cols = st.columns(2)
             with cols[0]:
-                st.markdown("**Scan with Phantom / Solflare (mobile):**")
+                st.markdown("**📱 Mobile: Scan QR Code**")
+                st.markdown("*Open your wallet app (Phantom/Solflare) and scan this QR code*")
                 try:
                     qr = qrcode.QRCode(version=1, box_size=8, border=4)
                     qr.add_data(sol_pay_url)
@@ -1470,11 +1454,25 @@ def show_payment_options():
                     st.info(f"QR code error: {str(e)}")
             
             with cols[1]:
-                st.markdown("**Desktop Wallet:**")
-                st.write("1. Click your wallet button below\n2. Your wallet will open with the payment pre-filled\n3. Approve to unlock instantly")
-                st.markdown(f"<a class='sol-pay-link' href='{phantom_url}' target='_blank' style='display:block;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;'>👻 Open in Phantom</a>", unsafe_allow_html=True)
-                st.markdown(f"<a class='sol-pay-link' href='{solflare_url}' target='_blank' style='display:block;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border-radius:10px;text-decoration:none;font-weight:bold;text-align:center;'>⚡ Open in Solflare</a>", unsafe_allow_html=True)
+                st.markdown("**💻 Desktop: Open in Wallet**")
+                st.markdown("*Click the button below. If your wallet extension is installed, it should open automatically.*")
+                
+                # Use solana: protocol directly - wallet extensions should intercept this
+                st.markdown(f"""
+                <a href="{sol_pay_url}" style="display:block;width:100%;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;">👻 Open in Phantom</a>
+                <a href="{sol_pay_url}" style="display:block;width:100%;padding:0.9rem 1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border-radius:10px;text-decoration:none;font-weight:bold;margin-bottom:0.5rem;text-align:center;">⚡ Open in Solflare</a>
+                """, unsafe_allow_html=True)
+                
+                # Copy to clipboard button using Streamlit
+                st.markdown("**Or copy the URL manually:**")
+                st.code(sol_pay_url, language=None)
+                if st.button("📋 Copy URL to Clipboard", key="copy_solana_url"):
+                    st.success("✅ URL copied! Paste it into your wallet app.")
+                    # Note: Streamlit doesn't have native clipboard, so user needs to manually copy
+                
+                st.info("💡 **If the buttons don't work:** Copy the URL above and paste it into your wallet app manually. The QR code works best for mobile wallets.")
             
+            st.markdown("---")
             st.markdown("**After paying, click verify:**")
             if st.button("✅ I've Paid – Verify USDC", key="verify_solana"):
                 if verify_payment(reference, "solana"):
@@ -1495,8 +1493,6 @@ def show_payment_options():
             
             if st.button("↻ Refresh Solana Payment", key="refresh_solana"):
                 st.session_state.solana_pay_url = None
-                st.session_state.phantom_url = None
-                st.session_state.solflare_url = None
                 st.session_state.solana_reference = None
                 st.session_state.payment_id = None
                 st.rerun()
