@@ -153,6 +153,8 @@ def render_terms_page():
 
 Last updated: 24 November 2025
 
+SnipeVision LLC (“SnipeVision”, “we”, “us”) provides the SnipeVision scanner platform. By using the service you agree to the terms below.
+
 <div class='static-card'>
 1. **Acceptance.** By accessing SnipeVision you agree to these Terms and our Privacy Policy.<br>
 2. **Service.** We provide chart analysis, alerts, and educational content on an “as-is” basis. SnipeVision is not financial advice.<br>
@@ -207,12 +209,60 @@ Last updated: 24 November 2025
     st.stop()
 
 
+def render_pricing_page():
+    content = """
+# Pricing – SnipeVision
+
+Last updated: 24 November 2025
+
+<div class='static-card'>
+<h3>Free Tier</h3>
+<ul>
+<li>3 Quick Snipe scans (tracked per email)</li>
+<li>Preview tweet exports</li>
+<li>No credit card required</li>
+</ul>
+</div>
+
+<div class='static-card'>
+<h3>Premium – $5/month</h3>
+<ul>
+<li>Unlimited Quick Snipe scans</li>
+<li>Custom rule engine (50+ indicators)</li>
+<li>Full-resolution charts + tweet exports</li>
+<li>Pay with Solana USDC or PayPal</li>
+</ul>
+</div>
+
+<div class='static-card'>
+<h3>What You Get with Premium</h3>
+<ul>
+<li>Real-time access to the SnipeVision scanner and live chart visualizations</li>
+<li>Ability to save/share tweet-ready breakdowns for every signal</li>
+<li>Custom strategy builder with up to 5 technical rules per scan</li>
+<li>Unlimited exports for social content or trade journals</li>
+</ul>
+</div>
+
+<div class='static-card'>
+<h3>How Billing Works</h3>
+<ul>
+<li>Subscription renews every 30 days</li>
+<li>Cancel anytime — access remains until renewal date</li>
+<li>Questions? Email <a href="mailto:hello@snipevision.xyz">hello@snipevision.xyz</a></li>
+</ul>
+</div>
+"""
+    render_static_page(content)
+    st.stop()
+
+
 def handle_static_routes():
     path = get_request_path().strip("/").lower()
     page_param = st.query_params.get("page", "").lower() if st.query_params.get("page") else ""
     target = None
     for candidate in [path, page_param]:
-        if candidate in ("terms", "privacy", "refund"):
+        if candidate in ("terms", "privacy", "refund", "pricing"):
             target = candidate
             break
     if target == "terms":
@@ -221,6 +271,8 @@ def handle_static_routes():
         render_privacy_page()
     elif target == "refund":
         render_refund_page()
+    elif target == "pricing":
+        render_pricing_page()
 
 
 handle_static_routes()
@@ -242,7 +294,27 @@ st.markdown("""
     .paypal-button {background: linear-gradient(45deg, #0070ba, #009cde) !important; color: white !important;}
     .chart-container {border: 2px solid #00ff88; border-radius: 15px; padding: 10px; background: #111;}
     .scan-counter {font-size: 1.5rem; color: #00ff88; text-align: center; padding: 1rem; background: rgba(0, 255, 136, 0.1); border-radius: 10px; margin: 1rem 0;}
+.nav-menu {position: fixed; top: 1rem; right: 1.5rem; z-index: 1000;}
+.nav-menu summary {list-style: none; cursor: pointer; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(0, 255, 136, 0.6); color: #00ff88; font-size: 1.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; box-shadow: 0 0 15px rgba(0,255,136,0.3);}
+.nav-menu summary::-webkit-details-marker {display: none;}
+.nav-menu[open] summary {background: linear-gradient(45deg, #00ff88, #00d0ff); color: #0e1117;}
+.nav-menu .nav-links {margin-top: 0.5rem; background: rgba(14, 17, 23, 0.95); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 0.5rem 0; min-width: 220px; backdrop-filter: blur(6px);}
+.nav-menu .nav-links a {display: block; padding: 0.6rem 1rem; color: #e6f8ff; text-decoration: none; font-size: 0.95rem;}
+.nav-menu .nav-links a:hover {background: rgba(0,255,136,0.12); color: #00ff88;}
 </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<details class='nav-menu'>
+    <summary>&#8942;</summary>
+    <div class='nav-links'>
+        <a href='https://snipevision.xyz/terms'>Terms & Conditions</a>
+        <a href='https://snipevision.xyz/privacy'>Privacy Policy</a>
+        <a href='https://snipevision.xyz/refund'>Refund Policy</a>
+        <a href='https://snipevision.xyz/pricing'>Pricing</a>
+        <a href='mailto:hello@snipevision.xyz'>Contact</a>
+    </div>
+</details>
 """, unsafe_allow_html=True)
 
 # Hero Section
@@ -1428,9 +1500,10 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
 st.caption("SnipeVision • Built with Cursor • Manual TA is dead 2025")
 st.markdown(
     "<div class='footer-links'>"
-    "<a href='/terms?page=terms'>Terms</a>"
-    "<a href='/privacy?page=privacy'>Privacy</a>"
-    "<a href='/refund?page=refund'>Refunds</a>"
+    "<a href='https://snipevision.xyz/terms'>Terms</a>"
+    "<a href='https://snipevision.xyz/privacy'>Privacy</a>"
+    "<a href='https://snipevision.xyz/refund'>Refunds</a>"
+    "<a href='https://snipevision.xyz/pricing'>Pricing</a>"
     "<a href='mailto:hello@snipevision.xyz'>Contact</a>"
     "</div>",
     unsafe_allow_html=True,
