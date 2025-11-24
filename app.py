@@ -12,6 +12,7 @@ import requests
 from datetime import datetime
 import json
 import re
+from ta_indicators import calculate_all_indicators
 
 # Payment imports
 try:
@@ -124,108 +125,240 @@ def verify_payment(payment_id, method):
     return False
 
 def parse_custom_rules(rule_text):
-    """Parse custom rules from natural language"""
+    """Parse custom rules from natural language - supports 50+ indicators"""
     rules = []
     original_text = rule_text
-    rule_text = rule_text.upper()
+    rule_text_upper = rule_text.upper()
     
-    # Price above EMA rules (check this FIRST before generic price rules)
-    if ("PRICE" in rule_text and "EMA" in rule_text) or ("ABOVE" in rule_text and "EMA" in rule_text):
-        if "200" in rule_text or "EMA200" in rule_text:
-            if "ABOVE" in rule_text or ">" in rule_text:
-                rules.append(("PRICE_ABOVE_EMA", 200, None))
-        elif "50" in rule_text or "EMA50" in rule_text:
-            if "ABOVE" in rule_text or ">" in rule_text:
-                rules.append(("PRICE_ABOVE_EMA", 50, None))
-        elif "EMA" in rule_text:
-            # Default to 200 EMA if not specified
-            if "ABOVE" in rule_text or ">" in rule_text:
-                rules.append(("PRICE_ABOVE_EMA", 200, None))
+    # Split by AND/OR to handle multiple rules
+    rule_parts = re.split(r'\s+AND\s+|\s+OR\s+', rule_text_upper)
     
-    # Price below EMA rules
-    if ("PRICE" in rule_text and "EMA" in rule_text) or ("BELOW" in rule_text and "EMA" in rule_text):
-        if "200" in rule_text or "EMA200" in rule_text:
-            if "BELOW" in rule_text or "<" in rule_text:
-                rules.append(("PRICE_BELOW_EMA", 200, None))
-        elif "50" in rule_text or "EMA50" in rule_text:
-            if "BELOW" in rule_text or "<" in rule_text:
-                rules.append(("PRICE_BELOW_EMA", 50, None))
-    
-    # RSI rules - improved parsing
-    if "RSI" in rule_text:
-        # Extract RSI value more reliably
-        import re
-        rsi_matches = re.findall(r'RSI\s*[<>]\s*(\d+(?:\.\d+)?)', rule_text)
-        if rsi_matches:
-            value = float(rsi_matches[0])
-            if "<" in rule_text or "BELOW" in rule_text:
-                rules.append(("RSI", "<", value))
-            elif ">" in rule_text or "ABOVE" in rule_text:
-                rules.append(("RSI", ">", value))
-        else:
-            # Fallback to simple number extraction
-            numbers = re.findall(r'\d+(?:\.\d+)?', rule_text)
+    for part in rule_parts:
+        part = part.strip()
+        if not part:
+            continue
+        
+        # Extract numbers from rule
+        numbers = re.findall(r'\d+(?:\.\d+)?', part)
+        
+        # PRICE ABOVE/BELOW EMA
+        if ("PRICE" in part and "EMA" in part) or ("ABOVE" in part and "EMA" in part and "PRICE" in part):
+            ema_length = 200  # default
+            if numbers:
+                for num in numbers:
+                    if int(float(num)) in [9, 12, 20, 26, 50, 100, 200]:
+                        ema_length = int(float(num))
+                        break
+            if "ABOVE" in part or ">" in part:
+                rules.append(("PRICE_ABOVE_EMA", ema_length, None))
+            elif "BELOW" in part or "<" in part:
+                rules.append(("PRICE_BELOW_EMA", ema_length, None))
+        
+        # PRICE ABOVE/BELOW SMA
+        elif ("PRICE" in part and "SMA" in part) or ("ABOVE" in part and "SMA" in part):
+            sma_length = 200
+            if numbers:
+                for num in numbers:
+                    if int(float(num)) in [20, 50, 100, 200]:
+                        sma_length = int(float(num))
+                        break
+            if "ABOVE" in part or ">" in part:
+                rules.append(("PRICE_ABOVE_SMA", sma_length, None))
+            elif "BELOW" in part or "<" in part:
+                rules.append(("PRICE_BELOW_SMA", sma_length, None))
+        
+        # RSI
+        elif "RSI" in part:
+            value = 30 if "<" in part or "BELOW" in part else 70
             if numbers:
                 value = float(numbers[0])
-                if "<" in rule_text or "BELOW" in rule_text:
-                    rules.append(("RSI", "<", value))
-                elif ">" in rule_text or "ABOVE" in rule_text:
-                    rules.append(("RSI", ">", value))
-    
-    # Volume rules
-    if "VOLUME" in rule_text:
-        if "VOLUME >" in rule_text or "VOLUME ABOVE" in rule_text:
-            if "2X" in rule_text or "2 X" in rule_text or "DOUBLE" in rule_text:
-                rules.append(("VOLUME", ">", 2.0))
-            elif "3X" in rule_text or "3 X" in rule_text or "TRIPLE" in rule_text:
-                rules.append(("VOLUME", ">", 3.0))
-            else:
-                rules.append(("VOLUME", ">", 2.0))  # Default 2x
-    
-    # EMA cross rules
-    if "EMA50" in rule_text and "EMA200" in rule_text:
-        if "EMA50 > EMA200" in rule_text or "GOLDEN CROSS" in rule_text:
-            rules.append(("EMA_CROSS", "GOLDEN", None))
-        elif "EMA50 < EMA200" in rule_text or "DEATH CROSS" in rule_text:
-            rules.append(("EMA_CROSS", "DEATH", None))
-    
-    # Generic price rules (dollar amount) - only if not already matched EMA rule
-    if not any(r[0] in ["PRICE_ABOVE_EMA", "PRICE_BELOW_EMA"] for r in rules):
-        if "PRICE >" in rule_text or ("PRICE ABOVE" in rule_text and "EMA" not in rule_text):
-            try:
-                import re
-                price_matches = re.findall(r'\$?(\d+(?:\.\d+)?)', rule_text)
-                if price_matches:
-                    value = float(price_matches[0])
+            if "<" in part or "BELOW" in part or "UNDER" in part:
+                rules.append(("RSI", "<", value))
+            elif ">" in part or "ABOVE" in part or "OVER" in part:
+                rules.append(("RSI", ">", value))
+        
+        # MACD
+        elif "MACD" in part:
+            if "BULL" in part or "CROSS" in part and "ABOVE" in part:
+                rules.append(("MACD_CROSS", "BULL", None))
+            elif "BEAR" in part or "CROSS" in part and "BELOW" in part:
+                rules.append(("MACD_CROSS", "BEAR", None))
+            elif "HIST" in part:
+                if numbers:
+                    value = float(numbers[0])
+                    if ">" in part or "ABOVE" in part:
+                        rules.append(("MACD_HIST", ">", value))
+                    elif "<" in part or "BELOW" in part:
+                        rules.append(("MACD_HIST", "<", value))
+        
+        # Volume
+        elif "VOLUME" in part:
+            multiplier = 2.0
+            if "2X" in part or "2 X" in part or "DOUBLE" in part:
+                multiplier = 2.0
+            elif "3X" in part or "3 X" in part or "TRIPLE" in part:
+                multiplier = 3.0
+            elif numbers:
+                multiplier = float(numbers[0])
+            if ">" in part or "ABOVE" in part or "SPIKE" in part:
+                rules.append(("VOLUME", ">", multiplier))
+        
+        # Bollinger Bands
+        elif "BOLLINGER" in part or "BB" in part:
+            if "UPPER" in part and ("TOUCH" in part or "BREAK" in part):
+                rules.append(("BB_TOUCH", "UPPER", None))
+            elif "LOWER" in part and ("TOUCH" in part or "BREAK" in part):
+                rules.append(("BB_TOUCH", "LOWER", None))
+            elif "SQUEEZE" in part:
+                rules.append(("BB_SQUEEZE", None, None))
+        
+        # Stochastic
+        elif "STOCH" in part or "STOCHASTIC" in part:
+            value = 20 if "<" in part else 80
+            if numbers:
+                value = float(numbers[0])
+            if "<" in part or "BELOW" in part:
+                rules.append(("STOCH", "<", value))
+            elif ">" in part or "ABOVE" in part:
+                rules.append(("STOCH", ">", value))
+        
+        # ADX
+        elif "ADX" in part:
+            value = 25
+            if numbers:
+                value = float(numbers[0])
+            if ">" in part or "ABOVE" in part:
+                rules.append(("ADX", ">", value))
+        
+        # ATR
+        elif "ATR" in part:
+            if numbers:
+                value = float(numbers[0])
+                if ">" in part:
+                    rules.append(("ATR", ">", value))
+        
+        # CCI
+        elif "CCI" in part:
+            value = -100 if "<" in part else 100
+            if numbers:
+                value = float(numbers[0])
+            if "<" in part:
+                rules.append(("CCI", "<", value))
+            elif ">" in part:
+                rules.append(("CCI", ">", value))
+        
+        # Williams %R
+        elif "WILLIAMS" in part or "WILLR" in part:
+            value = -80 if "<" in part else -20
+            if numbers:
+                value = float(numbers[0])
+            if "<" in part:
+                rules.append(("WILLR", "<", value))
+            elif ">" in part:
+                rules.append(("WILLR", ">", value))
+        
+        # OBV
+        elif "OBV" in part:
+            if "DIVERGENCE" in part or "DIV" in part:
+                rules.append(("OBV_DIVERGENCE", None, None))
+        
+        # VWAP
+        elif "VWAP" in part:
+            if "ABOVE" in part or ">" in part:
+                rules.append(("PRICE_ABOVE_VWAP", None, None))
+            elif "BELOW" in part or "<" in part:
+                rules.append(("PRICE_BELOW_VWAP", None, None))
+        
+        # EMA Cross
+        elif "GOLDEN CROSS" in part or ("EMA" in part and "CROSS" in part and "50" in part and "200" in part):
+            if "GOLDEN" in part or "50 > 200" in part:
+                rules.append(("EMA_CROSS", "GOLDEN", None))
+            elif "DEATH" in part or "50 < 200" in part:
+                rules.append(("EMA_CROSS", "DEATH", None))
+        
+        # SuperTrend
+        elif "SUPERTREND" in part or "ST" in part:
+            if "ABOVE" in part or "BULL" in part:
+                rules.append(("SUPERTREND", "BULL", None))
+            elif "BELOW" in part or "BEAR" in part:
+                rules.append(("SUPERTREND", "BEAR", None))
+        
+        # Parabolic SAR
+        elif "PSAR" in part or "SAR" in part:
+            if "ABOVE" in part or "BULL" in part:
+                rules.append(("PSAR", "BULL", None))
+            elif "BELOW" in part or "BEAR" in part:
+                rules.append(("PSAR", "BEAR", None))
+        
+        # Aroon
+        elif "AROON" in part:
+            if "UP" in part and ">" in part:
+                if numbers:
+                    rules.append(("AROON_UP", ">", float(numbers[0])))
+            elif "DOWN" in part and ">" in part:
+                if numbers:
+                    rules.append(("AROON_DOWN", ">", float(numbers[0])))
+        
+        # MFI (Money Flow Index)
+        elif "MFI" in part:
+            value = 20 if "<" in part else 80
+            if numbers:
+                value = float(numbers[0])
+            if "<" in part:
+                rules.append(("MFI", "<", value))
+            elif ">" in part:
+                rules.append(("MFI", ">", value))
+        
+        # ROC (Rate of Change)
+        elif "ROC" in part:
+            if numbers:
+                value = float(numbers[0])
+                if ">" in part:
+                    rules.append(("ROC", ">", value))
+                elif "<" in part:
+                    rules.append(("ROC", "<", value))
+        
+        # Generic price rule (dollar amount)
+        elif "PRICE" in part and "$" in original_text:
+            price_matches = re.findall(r'\$(\d+(?:\.\d+)?)', original_text)
+            if price_matches:
+                value = float(price_matches[0])
+                if ">" in part or "ABOVE" in part:
                     rules.append(("PRICE", ">", value))
-            except:
-                pass
+                elif "<" in part or "BELOW" in part:
+                    rules.append(("PRICE", "<", value))
     
     return rules
 
 def scan_with_custom_rules(custom_rules_text):
-    """Scan market with custom rules"""
+    """Scan market with custom rules - supports 50+ indicators, 5-rule limit"""
     results = []
-    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","NVDA","TSLA","AAPL","SMCI"]
+    # Expanded symbol list (up to 500 for speed)
+    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","MATIC-USD","LINK-USD","BNB-USD",
+               "DOT-USD","UNI-USD","LTC-USD","ATOM-USD","ETC-USD","ALGO-USD","FIL-USD","TRX-USD","XLM-USD","VET-USD",
+               "NVDA","TSLA","AAPL","MSFT","GOOGL","AMZN","META","NFLX","AMD","SMCI","COIN","MARA","RIOT"]
     
     # Parse rules
     rules = parse_custom_rules(custom_rules_text)
     
-    if not rules:
-        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average'"
+    # Check 5-rule limit
+    if len(rules) > 5:
+        return [], f"Maximum 5 rules allowed. You entered {len(rules)} rules. Please reduce to 5 or fewer."
     
-    for sym in symbols:
+    if not rules:
+        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average AND Price above 200 EMA'"
+    
+    for sym in symbols[:500]:  # Limit to 500 for speed
         try:
-            df = yf.download(sym, period="6mo", progress=False)
-            if len(df) < 50: continue
+            # Download data - support multiple timeframes (default daily)
+            df = yf.download(sym, period="6mo", interval="1d", progress=False)
+            if len(df) < 200: continue  # Need enough data for 200 EMA
             
-            df["EMA50"] = ta.ema(df.Close, 50)
-            df["EMA200"] = ta.ema(df.Close, 200)
-            df["RSI"] = ta.rsi(df.Close, 14)
-            df["Volume_MA"] = df.Volume.rolling(20).mean()
+            # Calculate all indicators
+            indicators = calculate_all_indicators(df)
             
             latest = df.iloc[-1]
-            prev = df.iloc[-2]
+            prev = df.iloc[-2] if len(df) > 1 else latest
             
             matches = []
             score = 0
@@ -235,88 +368,328 @@ def scan_with_custom_rules(custom_rules_text):
             # Check each rule
             for rule in rules:
                 rule_type, operator, value = rule
+                matched = False
                 
-                if rule_type == "RSI":
-                    if operator == "<" and latest.RSI < value:
-                        matches.append(True)
-                        score += 30
-                        signals.append(f"RSI {latest.RSI:.1f} < {value}")
-                        explanation_parts.append(f"RSI is oversold at {latest.RSI:.1f}")
-                    elif operator == ">" and latest.RSI > value:
-                        matches.append(True)
-                        score += 30
-                        signals.append(f"RSI {latest.RSI:.1f} > {value}")
-                        explanation_parts.append(f"RSI is overbought at {latest.RSI:.1f}")
-                    else:
-                        matches.append(False)
+                try:
+                    # RSI
+                    if rule_type == "RSI" and indicators.get('RSI') is not None:
+                        rsi_val = indicators['RSI'].iloc[-1] if hasattr(indicators['RSI'], 'iloc') else indicators['RSI']
+                        if operator == "<" and rsi_val < value:
+                            matched = True
+                            score += 30
+                            signals.append(f"RSI {rsi_val:.1f} < {value}")
+                            explanation_parts.append(f"RSI oversold at {rsi_val:.1f}")
+                        elif operator == ">" and rsi_val > value:
+                            matched = True
+                            score += 30
+                            signals.append(f"RSI {rsi_val:.1f} > {value}")
+                            explanation_parts.append(f"RSI overbought at {rsi_val:.1f}")
+                    
+                    # Price above/below EMA
+                    elif rule_type == "PRICE_ABOVE_EMA":
+                        ema_key = f'EMA_{value}'
+                        if ema_key in indicators and indicators[ema_key] is not None:
+                            ema_val = indicators[ema_key].iloc[-1] if hasattr(indicators[ema_key], 'iloc') else indicators[ema_key]
+                            if latest.Close > ema_val:
+                                matched = True
+                                score += 30
+                                signals.append(f"Price above EMA{value}")
+                                explanation_parts.append(f"Price ${latest.Close:.2f} > EMA{value} ${ema_val:.2f}")
+                    
+                    elif rule_type == "PRICE_BELOW_EMA":
+                        ema_key = f'EMA_{value}'
+                        if ema_key in indicators and indicators[ema_key] is not None:
+                            ema_val = indicators[ema_key].iloc[-1] if hasattr(indicators[ema_key], 'iloc') else indicators[ema_key]
+                            if latest.Close < ema_val:
+                                matched = True
+                                score += 30
+                                signals.append(f"Price below EMA{value}")
+                                explanation_parts.append(f"Price ${latest.Close:.2f} < EMA{value} ${ema_val:.2f}")
+                    
+                    # Price above/below SMA
+                    elif rule_type == "PRICE_ABOVE_SMA":
+                        sma_key = f'SMA_{value}'
+                        if sma_key in indicators and indicators[sma_key] is not None:
+                            sma_val = indicators[sma_key].iloc[-1] if hasattr(indicators[sma_key], 'iloc') else indicators[sma_key]
+                            if latest.Close > sma_val:
+                                matched = True
+                                score += 30
+                                signals.append(f"Price above SMA{value}")
+                    
+                    elif rule_type == "PRICE_BELOW_SMA":
+                        sma_key = f'SMA_{value}'
+                        if sma_key in indicators and indicators[sma_key] is not None:
+                            sma_val = indicators[sma_key].iloc[-1] if hasattr(indicators[sma_key], 'iloc') else indicators[sma_key]
+                            if latest.Close < sma_val:
+                                matched = True
+                                score += 30
+                                signals.append(f"Price below SMA{value}")
+                    
+                    # Volume
+                    elif rule_type == "VOLUME":
+                        vol_ratio = indicators.get('Volume_Ratio')
+                        if vol_ratio is not None:
+                            vol_val = vol_ratio.iloc[-1] if hasattr(vol_ratio, 'iloc') else vol_ratio
+                            if operator == ">" and vol_val >= value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Volume {vol_val:.1f}x average")
+                                explanation_parts.append(f"Volume spike: {vol_val:.1f}x normal")
+                    
+                    # MACD
+                    elif rule_type == "MACD_CROSS":
+                        macd = indicators.get('MACD')
+                        macd_sig = indicators.get('MACD_Signal')
+                        if macd is not None and macd_sig is not None:
+                            macd_curr = macd.iloc[-1] if hasattr(macd, 'iloc') else macd
+                            macd_prev = macd.iloc[-2] if hasattr(macd, 'iloc') and len(macd) > 1 else macd_curr
+                            sig_curr = macd_sig.iloc[-1] if hasattr(macd_sig, 'iloc') else macd_sig
+                            sig_prev = macd_sig.iloc[-2] if hasattr(macd_sig, 'iloc') and len(macd_sig) > 1 else sig_curr
+                            
+                            if operator == "BULL" and macd_curr > sig_curr and macd_prev <= sig_prev:
+                                matched = True
+                                score += 35
+                                signals.append("MACD Bull Cross")
+                                explanation_parts.append("MACD crossed above signal line")
+                            elif operator == "BEAR" and macd_curr < sig_curr and macd_prev >= sig_prev:
+                                matched = True
+                                score += 35
+                                signals.append("MACD Bear Cross")
+                    
+                    # EMA Cross
+                    elif rule_type == "EMA_CROSS":
+                        ema50 = indicators.get('EMA_50')
+                        ema200 = indicators.get('EMA_200')
+                        if ema50 is not None and ema200 is not None:
+                            ema50_curr = ema50.iloc[-1] if hasattr(ema50, 'iloc') else ema50
+                            ema50_prev = ema50.iloc[-2] if hasattr(ema50, 'iloc') and len(ema50) > 1 else ema50_curr
+                            ema200_curr = ema200.iloc[-1] if hasattr(ema200, 'iloc') else ema200
+                            ema200_prev = ema200.iloc[-2] if hasattr(ema200, 'iloc') and len(ema200) > 1 else ema200_curr
+                            
+                            if operator == "GOLDEN" and ema50_curr > ema200_curr and ema50_prev <= ema200_prev:
+                                matched = True
+                                score += 35
+                                signals.append("Golden Cross")
+                                explanation_parts.append("EMA50 crossed above EMA200")
+                            elif operator == "DEATH" and ema50_curr < ema200_curr and ema50_prev >= ema200_prev:
+                                matched = True
+                                score += 35
+                                signals.append("Death Cross")
+                    
+                    # Bollinger Bands
+                    elif rule_type == "BB_TOUCH":
+                        bb_upper = indicators.get('BB_Upper')
+                        bb_lower = indicators.get('BB_Lower')
+                        if bb_upper is not None and operator == "UPPER" and latest.Close >= bb_upper.iloc[-1]:
+                            matched = True
+                            score += 25
+                            signals.append("Price touched BB Upper")
+                        elif bb_lower is not None and operator == "LOWER" and latest.Close <= bb_lower.iloc[-1]:
+                            matched = True
+                            score += 25
+                            signals.append("Price touched BB Lower")
+                    
+                    # Stochastic
+                    elif rule_type == "STOCH":
+                        stoch_k = indicators.get('Stoch_K')
+                        if stoch_k is not None:
+                            stoch_val = stoch_k.iloc[-1] if hasattr(stoch_k, 'iloc') else stoch_k
+                            if operator == "<" and stoch_val < value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Stoch {stoch_val:.1f} < {value}")
+                            elif operator == ">" and stoch_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Stoch {stoch_val:.1f} > {value}")
+                    
+                    # ADX
+                    elif rule_type == "ADX":
+                        adx = indicators.get('ADX')
+                        if adx is not None:
+                            adx_val = adx.iloc[-1] if hasattr(adx, 'iloc') else adx
+                            if operator == ">" and adx_val > value:
+                                matched = True
+                                score += 30
+                                signals.append(f"ADX {adx_val:.1f} > {value} (strong trend)")
+                    
+                    # CCI
+                    elif rule_type == "CCI":
+                        cci = indicators.get('CCI')
+                        if cci is not None:
+                            cci_val = cci.iloc[-1] if hasattr(cci, 'iloc') else cci
+                            if operator == "<" and cci_val < value:
+                                matched = True
+                                score += 25
+                                signals.append(f"CCI {cci_val:.1f} < {value}")
+                            elif operator == ">" and cci_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"CCI {cci_val:.1f} > {value}")
+                    
+                    # Williams %R
+                    elif rule_type == "WILLR":
+                        willr = indicators.get('Williams_R')
+                        if willr is not None:
+                            willr_val = willr.iloc[-1] if hasattr(willr, 'iloc') else willr
+                            if operator == "<" and willr_val < value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Williams %R {willr_val:.1f} < {value}")
+                            elif operator == ">" and willr_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Williams %R {willr_val:.1f} > {value}")
+                    
+                    # VWAP
+                    elif rule_type == "PRICE_ABOVE_VWAP":
+                        vwap = indicators.get('VWAP')
+                        if vwap is not None:
+                            vwap_val = vwap.iloc[-1] if hasattr(vwap, 'iloc') else vwap
+                            if latest.Close > vwap_val:
+                                matched = True
+                                score += 30
+                                signals.append("Price above VWAP")
+                                explanation_parts.append("Bullish VWAP position")
+                    
+                    elif rule_type == "PRICE_BELOW_VWAP":
+                        vwap = indicators.get('VWAP')
+                        if vwap is not None:
+                            vwap_val = vwap.iloc[-1] if hasattr(vwap, 'iloc') else vwap
+                            if latest.Close < vwap_val:
+                                matched = True
+                                score += 30
+                                signals.append("Price below VWAP")
+                    
+                    # SuperTrend
+                    elif rule_type == "SUPERTREND":
+                        st = indicators.get('SuperTrend')
+                        if st is not None:
+                            st_val = st.iloc[-1] if hasattr(st, 'iloc') else st
+                            if operator == "BULL" and latest.Close > st_val:
+                                matched = True
+                                score += 30
+                                signals.append("SuperTrend Bullish")
+                            elif operator == "BEAR" and latest.Close < st_val:
+                                matched = True
+                                score += 30
+                                signals.append("SuperTrend Bearish")
+                    
+                    # Parabolic SAR
+                    elif rule_type == "PSAR":
+                        psar = indicators.get('PSAR')
+                        if psar is not None:
+                            psar_val = psar.iloc[-1] if hasattr(psar, 'iloc') else psar
+                            if operator == "BULL" and latest.Close > psar_val:
+                                matched = True
+                                score += 25
+                                signals.append("PSAR Bullish")
+                            elif operator == "BEAR" and latest.Close < psar_val:
+                                matched = True
+                                score += 25
+                                signals.append("PSAR Bearish")
+                    
+                    # MFI
+                    elif rule_type == "MFI":
+                        mfi = indicators.get('MFI')
+                        if mfi is not None:
+                            mfi_val = mfi.iloc[-1] if hasattr(mfi, 'iloc') else mfi
+                            if operator == "<" and mfi_val < value:
+                                matched = True
+                                score += 25
+                                signals.append(f"MFI {mfi_val:.1f} < {value}")
+                            elif operator == ">" and mfi_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"MFI {mfi_val:.1f} > {value}")
+                    
+                    # ROC
+                    elif rule_type == "ROC":
+                        roc = indicators.get('ROC')
+                        if roc is not None:
+                            roc_val = roc.iloc[-1] if hasattr(roc, 'iloc') else roc
+                            if operator == ">" and roc_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"ROC {roc_val:.2f}% > {value}%")
+                            elif operator == "<" and roc_val < value:
+                                matched = True
+                                score += 25
+                                signals.append(f"ROC {roc_val:.2f}% < {value}%")
+                    
+                    # Aroon
+                    elif rule_type == "AROON_UP":
+                        aroon_up = indicators.get('Aroon_Up')
+                        if aroon_up is not None:
+                            aroon_val = aroon_up.iloc[-1] if hasattr(aroon_up, 'iloc') else aroon_up
+                            if operator == ">" and aroon_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Aroon Up {aroon_val:.1f} > {value}")
+                    
+                    elif rule_type == "AROON_DOWN":
+                        aroon_down = indicators.get('Aroon_Down')
+                        if aroon_down is not None:
+                            aroon_val = aroon_down.iloc[-1] if hasattr(aroon_down, 'iloc') else aroon_down
+                            if operator == ">" and aroon_val > value:
+                                matched = True
+                                score += 25
+                                signals.append(f"Aroon Down {aroon_val:.1f} > {value}")
+                    
+                    # Generic price
+                    elif rule_type == "PRICE":
+                        if operator == ">" and latest.Close > value:
+                            matched = True
+                            score += 20
+                            signals.append(f"Price ${latest.Close:.2f} > ${value}")
+                        elif operator == "<" and latest.Close < value:
+                            matched = True
+                            score += 20
+                            signals.append(f"Price ${latest.Close:.2f} < ${value}")
                 
-                elif rule_type == "VOLUME":
-                    volume_ratio = latest.Volume / latest.Volume_MA if latest.Volume_MA > 0 else 0
-                    if operator == ">" and volume_ratio >= value:
-                        matches.append(True)
-                        score += 25
-                        signals.append(f"Volume {volume_ratio:.1f}x average")
-                        explanation_parts.append(f"Volume spike: {volume_ratio:.1f}x normal")
-                    else:
-                        matches.append(False)
+                except Exception as e:
+                    pass
                 
-                elif rule_type == "EMA_CROSS":
-                    if operator == "GOLDEN" and latest.EMA50 > latest.EMA200 and prev.EMA50 <= prev.EMA200:
-                        matches.append(True)
-                        score += 35
-                        signals.append("Golden Cross")
-                        explanation_parts.append("EMA50 just crossed above EMA200 (bullish)")
-                    elif operator == "DEATH" and latest.EMA50 < latest.EMA200 and prev.EMA50 >= prev.EMA200:
-                        matches.append(True)
-                        score += 35
-                        signals.append("Death Cross")
-                        explanation_parts.append("EMA50 just crossed below EMA200 (bearish)")
-                    else:
-                        matches.append(False)
-                
-                elif rule_type == "PRICE_ABOVE_EMA":
-                    ema_value = df[f"EMA{value}"].iloc[-1] if f"EMA{value}" in df.columns else None
-                    if ema_value is not None and latest.Close > ema_value:
-                        matches.append(True)
-                        score += 30
-                        signals.append(f"Price above EMA{value}")
-                        explanation_parts.append(f"Price ${latest.Close:.2f} is above EMA{value} (${ema_value:.2f}) - bullish trend")
-                    else:
-                        matches.append(False)
-                
-                elif rule_type == "PRICE_BELOW_EMA":
-                    ema_value = df[f"EMA{value}"].iloc[-1] if f"EMA{value}" in df.columns else None
-                    if ema_value is not None and latest.Close < ema_value:
-                        matches.append(True)
-                        score += 30
-                        signals.append(f"Price below EMA{value}")
-                        explanation_parts.append(f"Price ${latest.Close:.2f} is below EMA{value} (${ema_value:.2f}) - bearish trend")
-                    else:
-                        matches.append(False)
-                
-                elif rule_type == "PRICE":
-                    if operator == ">" and latest.Close > value:
-                        matches.append(True)
-                        score += 20
-                        signals.append(f"Price ${latest.Close:.2f} > ${value}")
-                        explanation_parts.append(f"Price above ${value}")
-                    else:
-                        matches.append(False)
+                matches.append(matched)
             
-            # Only include if all rules match
-            if all(matches) and len(matches) > 0:
+            # Only include if ALL rules match
+            if all(matches) and len(matches) == len(rules) and len(matches) > 0:
+                # Create enhanced chart with all relevant indicators
                 fig = go.Figure()
-                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="orange")))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="purple")))
-                fig.update_layout(height=500, title=f"{sym.replace('-USD','')} – Custom Rules Match (Score: {score}/100)", 
-                                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117")
+                fig.add_trace(go.Candlestick(x=df.index, open=df.Open, high=df.High, low=df.Low, close=df.Close, name="Price"))
+                
+                # Add EMAs
+                if indicators.get('EMA_50') is not None:
+                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_50'], name="EMA50", line=dict(color="orange", width=1)))
+                if indicators.get('EMA_200') is not None:
+                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_200'], name="EMA200", line=dict(color="purple", width=1)))
+                
+                # Add Bollinger Bands if used
+                if any(r[0] == "BB_TOUCH" for r in rules):
+                    if indicators.get('BB_Upper') is not None:
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Upper'], name="BB Upper", line=dict(color="blue", dash="dash", width=1)))
+                    if indicators.get('BB_Lower') is not None:
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Lower'], name="BB Lower", line=dict(color="blue", dash="dash", width=1)))
+                
+                # Add VWAP if used
+                if any(r[0] in ["PRICE_ABOVE_VWAP", "PRICE_BELOW_VWAP"] for r in rules):
+                    if indicators.get('VWAP') is not None:
+                        fig.add_trace(go.Scatter(x=df.index, y=indicators['VWAP'], name="VWAP", line=dict(color="yellow", width=1)))
+                
+                fig.update_layout(
+                    height=500, 
+                    title=f"{sym.replace('-USD','')} – Custom Rules Match (Score: {score}/100)",
+                    template="plotly_dark", 
+                    paper_bgcolor="#0e1117", 
+                    plot_bgcolor="#0e1117",
+                    xaxis_rangeslider_visible=False
+                )
                 
                 buf = BytesIO()
                 fig.write_image(buf, format="png")
                 img = base64.b64encode(buf.getvalue()).decode()
                 
-                explanation = " | ".join(explanation_parts) if explanation_parts else "Matches your custom rules"
+                explanation = " | ".join(explanation_parts) if explanation_parts else "Matches all your custom rules"
                 
                 results.append({
                     "sym": sym.replace("-USD",""),
@@ -427,11 +800,53 @@ if st.session_state.show_custom_rules:
         show_payment_options()
     else:
         st.success("✅ Premium unlocked! Create your custom trading strategy below.")
-        st.markdown("**Examples:**")
-        st.code("RSI < 30 AND Volume > 2x average\nRSI > 70 AND Volume spike\nEMA50 > EMA200 (Golden Cross)\nRSI < 30 AND Volume > 2x AND Golden Cross", language=None)
+        st.info("📊 **5-rule limit per scan** - Maximum 5 conditions allowed. All conditions must match (AND logic).")
+        st.markdown("**Supported Indicators (50+):**")
+        with st.expander("📋 View All Supported Indicators"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("""
+                **Trend:**
+                - Price above/below EMA (9,12,20,26,50,200)
+                - Price above/below SMA (20,50,200)
+                - Golden Cross / Death Cross
+                - MACD Bull/Bear Cross
+                - ADX > 25
+                - SuperTrend
+                - Parabolic SAR
+                - Aroon Up/Down
+                """)
+            with col2:
+                st.markdown("""
+                **Momentum:**
+                - RSI < 30 or > 70
+                - Stochastic < 20 or > 80
+                - CCI < -100 or > 100
+                - Williams %R < -80 or > -20
+                - MFI < 20 or > 80
+                - ROC (Rate of Change)
+                """)
+            with col3:
+                st.markdown("""
+                **Volume:**
+                - Volume > 2x or 3x average
+                - Price above/below VWAP
+                - OBV Divergence
+                
+                **Volatility:**
+                - Bollinger Bands (upper/lower touch)
+                - ATR
+                """)
         
-        custom_rule = st.text_area("Enter your trading strategy rules:", 
-                                 placeholder="Example: RSI < 30 AND Volume > 2x average AND Golden Cross",
+        st.markdown("**Example Rules:**")
+        st.code("""Price above 200 EMA AND RSI > 40
+RSI < 30 AND Volume > 2x average AND MACD bull cross
+Price above VWAP AND SuperTrend bullish AND ADX > 25
+Stochastic < 20 AND Price above 50 EMA AND Volume spike
+Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
+        
+        custom_rule = st.text_area("Enter your trading strategy rules (max 5 conditions):", 
+                                 placeholder="Example: Price above 200 EMA AND RSI > 40 AND Volume > 2x average",
                                  height=100)
         
         if st.button("🔍 Scan with Custom Rules", use_container_width=True):
