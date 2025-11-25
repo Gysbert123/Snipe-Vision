@@ -777,6 +777,34 @@ def save_subscription_record(email, wallet, reference, tx_amount):
         pass
 
 
+def check_webhook_payment(email):
+    """Check if payment was verified via webhook (for Lemon Squeezy)"""
+    if not email:
+        return False, None
+    
+    # Check Supabase for recent Lemon payments
+    client = get_supabase_client()
+    if client:
+        try:
+            result = client.table("subscriptions").select("*").eq("email", email.lower()).like("reference", "lemon-%").order("paid_at", desc=True).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                payment = result.data[0]
+                # Check if payment is still valid (not expired)
+                expires_at = payment.get("expires_at")
+                if expires_at:
+                    try:
+                        exp_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        if exp_date > datetime.utcnow():
+                            return True, payment
+                    except:
+                        pass
+                # If no expiry or expired, still return it but mark as expired
+                return True, payment
+        except Exception:
+            pass
+    
+    return False, None
+
 def check_subscription_status(identifier):
     client = get_supabase_client()
     if not client or not identifier:
@@ -1801,6 +1829,14 @@ def show_payment_options():
             placeholder="e.g. 123456 (from receipt email)",
         )
 
+        # Check if payment was verified via webhook first
+        webhook_check, webhook_data = check_webhook_payment(email_value)
+        if webhook_check:
+            st.success("✅ Payment verified via webhook! Premium unlocked.")
+            st.session_state.paid = True
+            st.balloons()
+            st.rerun()
+        
         if st.button("✅ Verify Lemon order", key="verify_lemon", use_container_width=True):
             ok, payload = verify_lemon_order(st.session_state.lemon_order_id, email_value)
             if ok:
@@ -1822,7 +1858,7 @@ def show_payment_options():
                 st.warning(error_msg)
                 # If API fails, offer manual verification option
                 if "404" in error_msg or "API error" in error_msg:
-                    st.info("💡 **API verification failed.** If you completed payment, email `hello@snipevision.xyz` with your order number and email for manual verification.")
+                    st.info("💡 **API verification failed.** If you completed payment, the webhook will verify automatically, or email `hello@snipevision.xyz` with your order number for manual verification.")
     else:
         st.info("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
 
