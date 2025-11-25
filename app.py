@@ -606,8 +606,9 @@ def verify_lemon_order(order_id, customer_email):
     search_url = "https://api.lemonsqueezy.com/v1/orders"
     
     try:
-        # First, try without filters to see if we can access orders at all
-        response = requests.get(search_url, headers=headers, params={"page[size]": 25}, timeout=15)
+        # First, try a simple request to see if API works at all
+        # Use minimal params to avoid filter issues
+        response = requests.get(search_url, headers=headers, timeout=15)
     except requests.RequestException as exc:
         return False, f"Unable to reach Lemon Squeezy API ({exc})."
 
@@ -1782,7 +1783,7 @@ def show_payment_options():
     # ------------------- OPTION B: LEMON SQUEEZY -------------------
     st.markdown("#### Option B — Lemon Squeezy checkout (card / PayPal / Apple Pay)")
     if LEMON_CHECKOUT_URL:
-        st.caption("Secure hosted checkout powered by Lemon Squeezy. After paying, paste your order ID below so we can verify automatically via API.")
+        st.caption("Secure hosted checkout powered by Lemon Squeezy. After paying, paste your order number below.")
         checkout_link = LEMON_CHECKOUT_URL
         encoded_email = quote_plus(email_value) if email_value else ""
         if encoded_email:
@@ -1792,7 +1793,7 @@ def show_payment_options():
             f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>🍋 Launch Lemon Squeezy Checkout</a>",
             unsafe_allow_html=True,
         )
-        st.caption("💡 **Tip:** Use the **order number** from your receipt email (usually a 6-8 digit number), not the order ID. Example: `123456`")
+        st.caption("💡 **Tip:** After checkout, copy the **order number** from your receipt email (usually 6-8 digits like `123456`).")
 
         st.session_state.lemon_order_id = st.text_input(
             "Lemon Squeezy order number",
@@ -1817,7 +1818,11 @@ def show_payment_options():
                 st.success("✅ Premium unlocked via Lemon Squeezy! Welcome to unlimited mode.")
                 st.balloons()
             else:
-                st.warning(payload)
+                error_msg = str(payload)
+                st.warning(error_msg)
+                # If API fails, offer manual verification option
+                if "404" in error_msg or "API error" in error_msg:
+                    st.info("💡 **API verification failed.** If you completed payment, email `hello@snipevision.xyz` with your order number and email for manual verification.")
     else:
         st.info("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
 
