@@ -595,28 +595,58 @@ def verify_lemon_order(order_id, customer_email):
     if not LEMON_API_KEY:
         return False, "LEMON_API_KEY is missing on the server."
 
-    clean_id = str(order_id).strip().lstrip("#")
+    clean_id = str(order_id).strip().lstrip("#").replace(" ", "")
     headers = {
         "Accept": "application/vnd.api+json",
         "Content-Type": "application/vnd.api+json",
         "Authorization": f"Bearer {LEMON_API_KEY}",
     }
+    
+    # Try direct order lookup first
     url = f"https://api.lemonsqueezy.com/v1/orders/{clean_id}"
-
+    
     try:
         response = requests.get(url, headers=headers, timeout=15)
     except requests.RequestException as exc:
         return False, f"Unable to reach Lemon Squeezy API ({exc})."
 
+    # If 404, try searching by order number (sometimes order ID is different from order number)
     if response.status_code == 404:
-        return False, "Order not found. Double-check the ID from your receipt email."
+        # Try listing recent orders and filtering
+        search_url = "https://api.lemonsqueezy.com/v1/orders"
+        try:
+            search_response = requests.get(
+                search_url,
+                headers=headers,
+                params={"filter[order_number]": clean_id},
+                timeout=15
+            )
+            if search_response.status_code == 200:
+                search_data = search_response.json()
+                orders = search_data.get("data", [])
+                if orders:
+                    # Found by order number, use the first match
+                    order_data = orders[0]
+                else:
+                    return False, f"Order '{clean_id}' not found. Check the order number from your receipt (not the order ID)."
+            else:
+                return False, f"Order not found. API returned {response.status_code}. Make sure you're using the order number from your receipt email, not the order ID."
+        except Exception as e:
+            return False, f"Order not found. Error: {str(e)}. Try the order number from your receipt email."
+    
     if response.status_code >= 400:
-        return False, f"Lemon Squeezy API error ({response.status_code})."
+        error_text = ""
+        try:
+            error_data = response.json()
+            error_text = str(error_data.get("errors", [{}])[0].get("detail", ""))
+        except:
+            pass
+        return False, f"Lemon Squeezy API error ({response.status_code}). {error_text}"
 
     try:
         payload = response.json()
     except ValueError:
-        return False, "Unexpected response from Lemon Squeezy."
+        return False, f"Unexpected response from Lemon Squeezy. Status: {response.status_code}"
 
     order_data = (payload or {}).get("data") or {}
     attributes = order_data.get("attributes") or {}
@@ -627,11 +657,11 @@ def verify_lemon_order(order_id, customer_email):
     if LEMON_VARIANT_ID:
         variant_id = str(attributes.get("variant_id") or "")
         if variant_id != str(LEMON_VARIANT_ID):
-            return False, "That order is for a different product."
+            return False, f"That order is for a different product (variant {variant_id})."
 
     email_on_order = (attributes.get("user_email") or attributes.get("customer_email") or "").lower()
     if customer_email and email_on_order and email_on_order != customer_email.lower():
-        return False, "Order email does not match the email you entered on SnipeVision."
+        return False, f"Order email ({email_on_order}) does not match your email ({customer_email.lower()})."
 
     attributes["order_id"] = clean_id
     return True, attributes
@@ -1744,12 +1774,12 @@ def show_payment_options():
             f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>🍋 Launch Lemon Squeezy Checkout</a>",
             unsafe_allow_html=True,
         )
-        st.caption("Need help finding your order ID? Check the receipt email or the success page after checkout.")
+        st.caption("💡 **Tip:** Use the **order number** from your receipt email (usually a 6-8 digit number), not the order ID. Example: `123456`")
 
         st.session_state.lemon_order_id = st.text_input(
-            "Lemon Squeezy order ID",
+            "Lemon Squeezy order number",
             value=st.session_state.lemon_order_id,
-            placeholder="e.g. 123456",
+            placeholder="e.g. 123456 (from receipt email)",
         )
 
         if st.button("✅ Verify Lemon order", key="verify_lemon", use_container_width=True):
