@@ -589,9 +589,9 @@ def _extract_usdc_received(meta, recipient_wallet):
 
 
 def verify_lemon_order(order_id, customer_email):
-    """Verify Lemon Squeezy order via API."""
+    """Verify Lemon Squeezy order via API by listing and filtering orders."""
     if not order_id:
-        return False, "Enter your Lemon Squeezy order ID."
+        return False, "Enter your Lemon Squeezy order number."
     if not LEMON_API_KEY:
         return False, "LEMON_API_KEY is missing on the server."
 
@@ -602,43 +602,33 @@ def verify_lemon_order(order_id, customer_email):
         "Authorization": f"Bearer {LEMON_API_KEY}",
     }
     
-    # Try direct order lookup first
-    url = f"https://api.lemonsqueezy.com/v1/orders/{clean_id}"
+    # List orders and filter by order number or email
+    # This is more reliable than direct lookup
+    search_url = "https://api.lemonsqueezy.com/v1/orders"
+    params = {}
+    
+    # Try filtering by order number first
+    if clean_id.isdigit():
+        params["filter[order_number]"] = clean_id
+    
+    # Also filter by email if provided
+    if customer_email:
+        params["filter[user_email]"] = customer_email.lower()
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(search_url, headers=headers, params=params, timeout=15)
     except requests.RequestException as exc:
         return False, f"Unable to reach Lemon Squeezy API ({exc})."
 
-    # If 404, try searching by order number (sometimes order ID is different from order number)
-    if response.status_code == 404:
-        # Try listing recent orders and filtering
-        search_url = "https://api.lemonsqueezy.com/v1/orders"
-        try:
-            search_response = requests.get(
-                search_url,
-                headers=headers,
-                params={"filter[order_number]": clean_id},
-                timeout=15
-            )
-            if search_response.status_code == 200:
-                search_data = search_response.json()
-                orders = search_data.get("data", [])
-                if orders:
-                    # Found by order number, use the first match
-                    order_data = orders[0]
-                else:
-                    return False, f"Order '{clean_id}' not found. Check the order number from your receipt (not the order ID)."
-            else:
-                return False, f"Order not found. API returned {response.status_code}. Make sure you're using the order number from your receipt email, not the order ID."
-        except Exception as e:
-            return False, f"Order not found. Error: {str(e)}. Try the order number from your receipt email."
-    
+    if response.status_code == 401:
+        return False, "Invalid API key. Check your LEMON_API_KEY in environment variables."
     if response.status_code >= 400:
         error_text = ""
         try:
             error_data = response.json()
-            error_text = str(error_data.get("errors", [{}])[0].get("detail", ""))
+            errors = error_data.get("errors", [])
+            if errors:
+                error_text = str(errors[0].get("detail", errors[0].get("title", "")))
         except:
             pass
         return False, f"Lemon Squeezy API error ({response.status_code}). {error_text}"
@@ -648,8 +638,32 @@ def verify_lemon_order(order_id, customer_email):
     except ValueError:
         return False, f"Unexpected response from Lemon Squeezy. Status: {response.status_code}"
 
-    order_data = (payload or {}).get("data") or {}
-    attributes = order_data.get("attributes") or {}
+    orders = payload.get("data", [])
+    if not orders:
+        return False, f"No orders found matching '{clean_id}'. Make sure you're using the order number from your receipt email (usually 6-8 digits)."
+    
+    # Find the matching order by order number
+    matching_order = None
+    for order in orders:
+        attrs = order.get("attributes", {})
+        order_num = str(attrs.get("order_number", ""))
+        if order_num == clean_id or clean_id in order_num:
+            matching_order = order
+            break
+    
+    # If no exact match, try by email if we have one
+    if not matching_order and customer_email:
+        for order in orders:
+            attrs = order.get("attributes", {})
+            order_email = (attrs.get("user_email") or attrs.get("customer_email") or "").lower()
+            if order_email == customer_email.lower():
+                matching_order = order
+                break
+    
+    if not matching_order:
+        return False, f"Order '{clean_id}' not found. Check the order number from your receipt email."
+    
+    attributes = matching_order.get("attributes") or {}
     status = (attributes.get("status") or "").lower()
     if status not in {"paid", "completed"}:
         return False, f"Order status is '{status}'. It must be paid before unlocking."
@@ -663,7 +677,8 @@ def verify_lemon_order(order_id, customer_email):
     if customer_email and email_on_order and email_on_order != customer_email.lower():
         return False, f"Order email ({email_on_order}) does not match your email ({customer_email.lower()})."
 
-    attributes["order_id"] = clean_id
+    order_num = attributes.get("order_number", clean_id)
+    attributes["order_id"] = str(order_num)
     return True, attributes
 
 
