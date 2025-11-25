@@ -5,7 +5,9 @@ import pandas_ta as ta
 import plotly.graph_objects as go
 from io import BytesIO
 import base64
+import html
 import os
+import qrcode
 import time
 import requests
 from datetime import datetime, timedelta
@@ -55,32 +57,20 @@ if 'show_custom_rules' not in st.session_state:
 if 'show_tweet_info' not in st.session_state:
     st.session_state.show_tweet_info = False
 
-if 'payment_method' not in st.session_state:
-    st.session_state.payment_method = None
-
-if 'payment_pending' not in st.session_state:
-    st.session_state.payment_pending = False
-
-if 'payment_id' not in st.session_state:
-    st.session_state.payment_id = None
-
 if 'solana_reference' not in st.session_state:
     st.session_state.solana_reference = None
 
 if 'solana_pay_url' not in st.session_state:
     st.session_state.solana_pay_url = None
 
+if 'solana_signature' not in st.session_state:
+    st.session_state.solana_signature = ""
+
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 
 if 'user_wallet' not in st.session_state:
     st.session_state.user_wallet = ""
-
-if 'wallet_connected' not in st.session_state:
-    st.session_state.wallet_connected = False
-
-if 'wallet_address' not in st.session_state:
-    st.session_state.wallet_address = ""
 
 if 'subscription_lookup' not in st.session_state:
     st.session_state.subscription_lookup = ""
@@ -392,6 +382,10 @@ header[data-testid="stHeader"], div[data-testid="stToolbar"], .stAppDeployButton
 .matrix-hint {font-size: 0.85rem; letter-spacing: 0.2rem; color: rgba(255,255,255,0.5); text-transform: uppercase; text-align: center; margin-top: 1rem;}
 
 .silky-card {background: rgba(255,255,255,0.025); border-radius: 24px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.04); box-shadow: 0 15px 40px rgba(0,0,0,0.4);}
+.copy-wrapper {margin-top: 0.4rem;}
+.copy-hidden {position: absolute; left: -9999px; top: -9999px; opacity: 0;}
+.copy-tweet-btn {width: 100%; padding: 0.75rem 1rem; border-radius: 12px; border: 1px solid rgba(0,255,136,0.5); background: linear-gradient(120deg, rgba(0,255,136,0.25), rgba(25,217,255,0.25)); color: #e6f8ff; font-weight: 600; cursor: pointer; transition: all 0.2s ease;}
+.copy-tweet-btn:hover {background: linear-gradient(120deg, rgba(0,255,136,0.45), rgba(25,217,255,0.45)); box-shadow: 0 10px 30px rgba(0,255,136,0.25);}
 
 @keyframes logoPulse {0% {filter: drop-shadow(0 0 15px rgba(0,255,136,0.3));} 50% {filter: drop-shadow(0 0 35px rgba(25,217,255,0.6));} 100% {filter: drop-shadow(0 0 15px rgba(0,255,136,0.3));}}
 @keyframes gradientShift {0% {background-position: 0% 50%;} 100% {background-position: 200% 50%;}}
@@ -439,10 +433,10 @@ hero_left, hero_right = st.columns([3, 2])
 with hero_left:
     st.markdown(f"""
     <div class='hero-header'>
-        <img src="{NEON_LOGO}" alt="SniperVision neon logo" class="sniper-logo" />
+        <img src="{NEON_LOGO}" alt="SnipeVision neon logo" class="sniper-logo" />
         <div class='hero-copy'>
             <p class='eyebrow'>AUTOMATED 24/7 ALPHA RADAR</p>
-            <h1 class='hyper-title'>SNIPERVISION</h1>
+            <h1 class='hyper-title'>SNIPEVISION</h1>
             <p class='subtitle'>Neon-grade liquidity optics that surface sniper-ready entries before the herd even yawns.</p>
         </div>
     </div>
@@ -473,7 +467,7 @@ with hero_right:
     st.markdown("""
     <div class='hero-hud'>
         <div class='pill'>LIVE HUD</div>
-        <h3>Sniper console</h3>
+        <h3>SnipeVision console</h3>
         <ul>
             <li>Animated candlestick radar with matrix scanlines</li>
             <li>AI breakdown: buy / sell / hedge bias on every hit</li>
@@ -527,24 +521,117 @@ with feature_cols[2]:
         st.session_state.show_tweet_info = True
         st.rerun()
 
+# Tweet copy helper
+def render_copy_button(tweet_text, element_id):
+    """Render a client-side copy-to-clipboard button without rerunning Streamlit."""
+    safe_id = re.sub(r'[^0-9a-zA-Z_-]', '', element_id) or f"copy_{secrets.token_hex(4)}"
+    escaped_text = html.escape(tweet_text).replace("\n", "&#10;")
+    st.markdown(
+        f"""
+        <div class="copy-wrapper">
+            <textarea id="{safe_id}" class="copy-hidden">{escaped_text}</textarea>
+            <button class="copy-tweet-btn" onclick="const el=document.getElementById('{safe_id}'); el.select(); document.execCommand('copy'); alert('Tweet copied to clipboard!');">📋 Copy Tweet</button>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _extract_usdc_received(meta, recipient_wallet):
+    """Return the USDC amount (in tokens) received by recipient in this transaction."""
+    def _read_balance(entries):
+        if not entries:
+            return 0.0
+        for entry in entries:
+            owner = entry.get("owner") or entry.get("accountOwner")
+            if owner == recipient_wallet and entry.get("mint") == SOLANA_USDC_MINT:
+                token_info = entry.get("uiTokenAmount") or {}
+                ui_amount = token_info.get("uiAmount")
+                if ui_amount is not None:
+                    try:
+                        return float(ui_amount)
+                    except (TypeError, ValueError):
+                        return 0.0
+                raw_amount = token_info.get("amount")
+                decimals = token_info.get("decimals", 0)
+                if raw_amount is not None:
+                    try:
+                        return float(raw_amount) / (10 ** decimals)
+                    except (TypeError, ValueError):
+                        return 0.0
+        return 0.0
+
+    pre_amount = _read_balance(meta.get("preTokenBalances"))
+    post_amount = _read_balance(meta.get("postTokenBalances"))
+    delta = post_amount - pre_amount
+
+    # Fallback to tokenBalanceChanges (Helius extension) if delta is zero
+    if delta <= 0:
+        for change in meta.get("tokenBalanceChanges", []) or []:
+            if change.get("userAccount") == recipient_wallet and change.get("mint") == SOLANA_USDC_MINT:
+                raw = change.get("rawTokenAmount") or {}
+                if "tokens" in raw:
+                    try:
+                        return float(raw["tokens"])
+                    except (TypeError, ValueError):
+                        continue
+                amount = raw.get("amount")
+                decimals = raw.get("decimals", 0)
+                if amount is not None:
+                    try:
+                        return float(amount) / (10 ** decimals)
+                    except (TypeError, ValueError):
+                        continue
+    return delta
+
+
 # Payment verification function
-def verify_payment(payment_id, method):
-    """Verify payment status"""
+def verify_payment(identifier, method):
+    """Verify payment status by checking the on-chain transaction."""
+    if method != "solana":
+        return False, "Unsupported payment method."
+
+    signature = (identifier or "").strip()
+    if not signature:
+        return False, "Paste the Solana transaction signature from your wallet."
+
+    helius_api = os.getenv("HELIUS_API_KEY", "")
+    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+    if not helius_api:
+        return False, "Helius API key is missing on the server."
+    if not recipient:
+        return False, "Recipient wallet address is not configured."
+
+    endpoint = f"https://mainnet.helius-rpc.com/?api-key={helius_api}"
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+    }
+
     try:
-        if method == "solana":
-            helius_api = os.getenv("HELIUS_API_KEY", "")
-            if helius_api:
-                return True
-            return False
-        elif method == "paypal":
-            paypal_client_id = os.getenv("PAYPAL_CLIENT_ID", "")
-            paypal_secret = os.getenv("PAYPAL_SECRET", "")
-            if paypal_client_id and paypal_secret:
-                return True
-            return False
-    except:
-        return False
-    return False
+        response = requests.post(endpoint, json=payload, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        return False, f"Unable to reach Helius RPC ({exc})."
+    except ValueError:
+        return False, "Unexpected response from Helius RPC."
+
+    tx = data.get("result")
+    if not tx:
+        return False, "Transaction not found yet. Give it 5-10 seconds and try again."
+
+    meta = tx.get("meta") or {}
+    if meta.get("err") is not None:
+        return False, "Transaction failed on-chain."
+
+    received_amount = _extract_usdc_received(meta, recipient)
+    if received_amount >= SOLANA_DEFAULT_AMOUNT - 0.01:
+        return True, f"Detected {received_amount:.2f} USDC sent to SnipeVision."
+
+    return False, f"Found only {received_amount:.2f} USDC routed to the recipient. Double-check the signature."
 
 SOLANA_USDC_MINT = os.getenv("SOLANA_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
 SOLANA_DEFAULT_AMOUNT = float(os.getenv("SOLANA_SUB_AMOUNT", "5"))
@@ -1511,251 +1598,82 @@ def scan_with_custom_rules(custom_rules_text):
 def show_payment_options():
     st.markdown("---")
     st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
-    st.markdown("### 💳 Upgrade to Premium - $5/month")
-    st.markdown("**Unlock unlimited scans, custom rules, and tweet exports**")
-    
+    st.markdown("### 💳 Unlock Premium – $5/month")
+    st.markdown("**Send $5 USDC on Solana to unlock unlimited scans, custom rules, and tweet exports.**")
+
     recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
     amount_usdc = SOLANA_DEFAULT_AMOUNT
-    
-    # Inject wallet connection and payment JavaScript
-    st.markdown(f"""
-    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-    <script>
-    window.walletAddress = null;
-    window.walletProvider = null;
-    window.recipientAddress = '{recipient}';
-    window.amountUSDC = {amount_usdc};
-    
-    window.connectPhantom = async function() {{
-        try {{
-            console.log('Connecting to Phantom...');
-            if (window.solana && window.solana.isPhantom) {{
-                console.log('Phantom found, connecting...');
-                const response = await window.solana.connect();
-                window.walletAddress = response.publicKey.toString();
-                window.walletProvider = window.solana;
-                console.log('Connected:', window.walletAddress);
-                
-                const displayEl = document.getElementById('wallet-address-display');
-                const connectEl = document.getElementById('connect-section');
-                const paymentEl = document.getElementById('payment-section');
-                
-                if (displayEl) {{
-                    displayEl.innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
-                    displayEl.style.color = '#00ff88';
-                }}
-                if (connectEl) connectEl.style.display = 'none';
-                if (paymentEl) paymentEl.style.display = 'block';
-                
-                // Store in localStorage
-                localStorage.setItem('wallet_address', window.walletAddress);
-                localStorage.setItem('wallet_connected', 'true');
-                
-                alert('Wallet connected! Address: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8) + '\\n\\nPlease refresh the page to continue.');
-                return window.walletAddress;
-            }} else {{
-                alert('Phantom wallet not found! Please install Phantom extension from https://phantom.app');
-                window.open('https://phantom.app', '_blank');
-                return null;
-            }}
-        }} catch (err) {{
-            console.error('Connection error:', err);
-            alert('Failed to connect: ' + err.message);
-            return null;
-        }}
-    }};
-    
-    window.connectSolflare = async function() {{
-        try {{
-            console.log('Connecting to Solflare...');
-            if (window.solflare) {{
-                console.log('Solflare found, connecting...');
-                await window.solflare.connect();
-                window.walletAddress = window.solflare.publicKey.toString();
-                window.walletProvider = window.solflare;
-                console.log('Connected:', window.walletAddress);
-                
-                const displayEl = document.getElementById('wallet-address-display');
-                const connectEl = document.getElementById('connect-section');
-                const paymentEl = document.getElementById('payment-section');
-                
-                if (displayEl) {{
-                    displayEl.innerText = 'Connected: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8);
-                    displayEl.style.color = '#00ff88';
-                }}
-                if (connectEl) connectEl.style.display = 'none';
-                if (paymentEl) paymentEl.style.display = 'block';
-                
-                localStorage.setItem('wallet_address', window.walletAddress);
-                localStorage.setItem('wallet_connected', 'true');
-                
-                alert('Wallet connected! Address: ' + window.walletAddress.substring(0, 8) + '...' + window.walletAddress.substring(window.walletAddress.length - 8) + '\\n\\nPlease refresh the page to continue.');
-                return window.walletAddress;
-            }} else {{
-                alert('Solflare wallet not found! Please install Solflare extension from https://solflare.com');
-                window.open('https://solflare.com', '_blank');
-                return null;
-            }}
-        }} catch (err) {{
-            console.error('Connection error:', err);
-            alert('Failed to connect: ' + err.message);
-            return null;
-        }}
-    }};
-    
-    window.sendPayment = async function() {{
-        if (!window.walletProvider || !window.walletAddress) {{
-            alert('Please connect your wallet first!');
-            return null;
-        }}
-        
-        try {{
-            const {{ Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL }} = window.solanaWeb3;
-            const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-            const toPubkey = new PublicKey(window.recipientAddress);
-            
-            // For USDC payment, we need SPL Token transfer
-            // This simplified version sends SOL - for production, implement SPL Token transfer
-            // Amount in SOL (converting USDC amount approximately)
-            const lamports = Math.floor(window.amountUSDC * LAMPORTS_PER_SOL);
-            
-            const transaction = new Transaction().add(
-                SystemProgram.transfer({{
-                    fromPubkey: window.walletProvider.publicKey,
-                    toPubkey: toPubkey,
-                    lamports: lamports,
-                }})
-            );
-            
-            const signature = await window.walletProvider.sendTransaction(transaction, connection);
-            await connection.confirmTransaction(signature, 'confirmed');
-            
-            localStorage.setItem('payment_signature', signature);
-            alert('Payment sent! Transaction: ' + signature.substring(0, 16) + '...\\n\\nClick "Verify Payment" below.');
-            return signature;
-        }} catch (err) {{
-            alert('Payment failed: ' + err.message);
-            return null;
-        }}
-    }};
-    
-    // Check for existing connection on load
-    window.checkWalletConnection = function() {{
-        if (localStorage.getItem('wallet_connected') === 'true') {{
-            const addr = localStorage.getItem('wallet_address');
-            if (addr) {{
-                window.walletAddress = addr;
-                const displayEl = document.getElementById('wallet-address-display');
-                const connectEl = document.getElementById('connect-section');
-                const paymentEl = document.getElementById('payment-section');
-                if (displayEl) {{
-                    displayEl.innerText = 'Connected: ' + addr.substring(0, 8) + '...' + addr.substring(addr.length - 8);
-                    displayEl.style.color = '#00ff88';
-                }}
-                if (connectEl) connectEl.style.display = 'none';
-                if (paymentEl) paymentEl.style.display = 'block';
-            }}
-        }}
-    }};
-    
-    // Run on page load
-    window.addEventListener('load', function() {{
-        window.checkWalletConnection();
-    }});
-    
-    // Also check immediately
-    window.checkWalletConnection();
-    </script>
-    """, unsafe_allow_html=True)
-    
-    # Wallet connection UI
-    if not st.session_state.wallet_connected:
-        st.markdown("### 🔗 Connect Your Wallet")
-        st.info("Connect your Phantom or Solflare wallet to pay with USDC")
-        
-        st.markdown("""
-        <div id="connect-section">
-            <div style="display:flex;gap:1rem;margin:1rem 0;">
-                <button onclick="connectPhantom()" style="flex:1;padding:1.2rem;background:linear-gradient(135deg,#AB9FF2,#7645D9);color:white;border:none;border-radius:10px;font-weight:bold;font-size:1rem;cursor:pointer;">👻 Connect Phantom</button>
-                <button onclick="connectSolflare()" style="flex:1;padding:1.2rem;background:linear-gradient(135deg,#14F195,#00D9FF);color:white;border:none;border-radius:10px;font-weight:bold;font-size:1rem;cursor:pointer;">⚡ Connect Solflare</button>
-            </div>
-            <p id="wallet-address-display" style="text-align:center;color:#888;margin-top:1rem;">Not connected</p>
-        </div>
-        <div id="payment-section" style="display:none;">
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Manual wallet address input as fallback
-        st.markdown("---")
-        st.markdown("**Or enter your wallet address manually:**")
-        manual_wallet = st.text_input("Wallet Address", key="manual_wallet", placeholder="Enter your Solana wallet address (e.g., 9xQeWvG816bUx9EPjH2T1F67L2Prgktq1XqZgdpvMdmc)")
-        if manual_wallet and len(manual_wallet) > 30:
-            # Basic validation for Solana address
-            if manual_wallet.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z')):
-                st.session_state.wallet_address = manual_wallet
-                st.session_state.wallet_connected = True
-                st.rerun()
+
+    if not st.session_state.user_email.strip():
+        st.warning("Enter your email above so we can tie the unlock to your account.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    if st.session_state.solana_pay_url is None or st.session_state.solana_reference is None:
+        sol_url, reference = generate_solana_pay_request()
+        st.session_state.solana_pay_url = sol_url
+        st.session_state.solana_reference = reference
+
+    sol_pay_url = st.session_state.solana_pay_url
+    reference = st.session_state.solana_reference
+
+    st.markdown("#### 1. Send the $5 USDC payment")
+    info_cols = st.columns([1, 1])
+    with info_cols[0]:
+        st.write(f"**Recipient wallet:** `{recipient}`")
+        st.write(f"**Memo / reference:** `{reference}`")
+        st.write(f"**Amount:** {amount_usdc} USDC (SPL)")
+        st.markdown("Scan the QR with Phantom/Solflare **or** paste the Solana Pay URL below into your wallet.")
+    with info_cols[1]:
+        try:
+            qr = qrcode.QRCode(version=1, box_size=7, border=4)
+            qr.add_data(sol_pay_url)
+            qr.make(fit=True)
+            img_qr = qr.make_image(fill_color="#00ff88", back_color="#05060c")
+            buf_qr = BytesIO()
+            img_qr.save(buf_qr, format="PNG")
+            buf_qr.seek(0)
+            st.image(buf_qr, width=220, caption="Scan with Phantom / Solflare")
+        except Exception as err:
+            st.info(f"QR code unavailable ({err}). Copy the URL below instead.")
+
+    st.markdown("**Solana Pay URL:**")
+    st.code(sol_pay_url, language=None)
+    st.caption("Tip: Copy this URL, open Phantom/Solflare → Settings → Solana Pay → Paste URL.")
+
+    st.markdown("#### 2. Paste the transaction signature")
+    st.session_state.solana_signature = st.text_input(
+        "Transaction signature",
+        value=st.session_state.solana_signature,
+        placeholder="5YkK3d... (found in your wallet after sending USDC)",
+    )
+
+    st.markdown("#### 3. Verify on-chain")
+    verify_col, refresh_col = st.columns([2, 1])
+    with verify_col:
+        if st.button("✅ I've paid – verify USDC", key="verify_solana", use_container_width=True):
+            ok, message = verify_payment(st.session_state.solana_signature, "solana")
+            if ok:
+                st.session_state.paid = True
+                save_subscription_record(
+                    st.session_state.user_email.strip(),
+                    st.session_state.user_wallet.strip(),
+                    st.session_state.solana_signature.strip(),
+                    amount_usdc,
+                )
+                st.session_state.solana_signature = ""
+                st.session_state.solana_pay_url = None
+                st.session_state.solana_reference = None
+                st.success("✅ Premium unlocked! Create your custom trading strategy below.")
+                st.balloons()
             else:
-                st.error("Invalid Solana wallet address format")
-        
-        # Button to check if wallet was connected via JavaScript
-        if st.button("🔄 Check Wallet Connection", key="check_wallet_js"):
-            # This triggers a rerun to check localStorage
-            st.info("If you connected your wallet via the buttons above, it should appear below. If not, try entering your address manually.")
-    
-    # Payment UI (shown after wallet is connected)
-    if st.session_state.wallet_connected or st.session_state.wallet_address:
-        st.markdown("### 💰 Pay with Connected Wallet")
-        st.markdown(f"**Amount:** {amount_usdc} USDC")
-        st.markdown(f"**Recipient:** `{recipient}`")
-        
-        wallet_addr = st.session_state.wallet_address or "Not set"
-        if wallet_addr and len(wallet_addr) > 20:
-            st.success(f"✅ Wallet: `{wallet_addr[:8]}...{wallet_addr[-8:]}`")
-        
-        st.markdown(f"""
-        <div id="payment-section">
-            <button onclick="sendPayment()" style="width:100%;padding:1.2rem;background:linear-gradient(45deg,#00ff88,#00d0ff);color:#0e1117;border:none;border-radius:10px;font-weight:bold;font-size:1.1rem;cursor:pointer;margin-top:1rem;">💳 Pay ${amount_usdc} USDC</button>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("**After sending payment, click verify:**")
-        
-        # Verify payment button
-        if st.button("✅ Verify Payment", key="verify_payment", use_container_width=True):
-            if st.session_state.wallet_address:
-                # Generate reference for this payment
-                reference = f"wallet_{st.session_state.wallet_address}_{int(time.time())}"
-                if verify_payment(reference, "solana"):
-                    st.session_state.paid = True
-                    st.session_state.payment_pending = False
-                    save_subscription_record(
-                        st.session_state.user_email.strip(),
-                        st.session_state.wallet_address,
-                        reference,
-                        amount_usdc,
-                    )
-                    st.success("✅ Payment verified! Unlimited scans unlocked.")
-                    st.balloons()
-                    st.rerun()
-                else:
-                    st.warning("Payment not detected yet. Make sure you sent the payment and wait a few seconds before verifying.")
-            else:
-                st.warning("Please connect your wallet first.")
-        
-        if st.button("🔄 Disconnect Wallet", key="disconnect_wallet"):
-            st.session_state.wallet_connected = False
-            st.session_state.wallet_address = ""
-            st.markdown("""
-            <script>
-            localStorage.removeItem('wallet_address');
-            localStorage.removeItem('wallet_connected');
-            localStorage.removeItem('payment_signature');
-            </script>
-            """, unsafe_allow_html=True)
+                st.warning(message)
+    with refresh_col:
+        if st.button("↻ New payment QR/link", key="refresh_solana_link", use_container_width=True):
+            st.session_state.solana_pay_url = None
+            st.session_state.solana_reference = None
             st.rerun()
-    
+
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
 
@@ -1893,8 +1811,7 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                             # Tweet export
                             tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
                             st.code(tweet, language=None)
-                            if st.button("📋 Copy Tweet", key=f"custom_copy_{r['sym']}"):
-                                st.toast("✅ Copied to clipboard!")
+                            render_copy_button(tweet, f"custom_copy_{r['sym']}")
                 else:
                     st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
                 
@@ -1916,7 +1833,34 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
 if st.session_state.show_tweet_info:
     st.markdown("---")
     st.markdown("### 🐦 One-Click Post to X")
-    st.info("After running a scan, each result includes a ready-to-post tweet. Just click 'Copy Tweet' and paste it on X (Twitter)!")
+    st.info("Use the template below for ad-hoc posts or copy the auto-generated tweets attached to every scan result.")
+    tweet_col1, tweet_col2 = st.columns(2)
+    with tweet_col1:
+        template_symbol = st.text_input("Symbol", value="NVDA", key="tweet_template_symbol").upper()
+        template_timeframe = st.selectbox("Timeframe", ["1D", "4H", "1H", "15m"], key="tweet_timeframe")
+    with tweet_col2:
+        template_bias = st.selectbox("Bias / Call", ["Bullish", "Bearish", "Neutral"], key="tweet_bias")
+        template_flavor = st.selectbox(
+            "Voice",
+            ["classic alpha", "degen hype", "institutional", "newsflash"],
+            key="tweet_voice",
+        )
+
+    template_map = {
+        "classic alpha": "flagged early momentum",
+        "degen hype": "primed for a face-melting squeeze",
+        "institutional": "printing a clean structure break",
+        "newsflash": "dropping a high-confidence signal",
+    }
+    template_line = template_map.get(template_flavor, "flagged early momentum")
+    tweet_preview = (
+        f"🏹 SnipeVision just {template_line} on {template_symbol} ({template_timeframe}) — "
+        f"{template_bias} bias with confluence across liquidity / momentum.\n"
+        f"https://snipevision.xyz"
+    )
+    st.code(tweet_preview, language=None)
+    render_copy_button(tweet_preview, f"tweet_mode_{template_symbol}")
+    st.caption("Tip: Run a scan to get symbol-specific tweets with actual signals & context.")
     st.markdown("---")
 
 # Show scanner section if Quick Snipe was clicked
@@ -2058,7 +2002,7 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
         else:
             st.markdown("""
             <div class='paywall-overlay'>
-                <div class='pill'>sniper pass</div>
+                <div class='pill'>snipe pass</div>
                 <h2>Reload the chamber</h2>
                 <div class='price-tag'>$5<span>per month</span></div>
                 <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Solana wallet unlock.</p>
@@ -2106,8 +2050,7 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
                 if st.session_state.paid or st.session_state.scans <= 3:
                     tweet = f"🏹 SnipeVision just found {r['sym']} ({r.get('timeframe','1D')}) → {' • '.join(r['signals'])} | Score {r['score']}/100\nhttps://snipevision.xyz"
                     st.code(tweet, language=None)
-                    if st.button("📋 Copy Tweet", key=f"copy_{r['sym']}"):
-                        st.toast("✅ Copied to clipboard! Paste it on X now!")
+                    render_copy_button(tweet, f"copy_{r['sym']}")
                 else:
                     st.info("🔒 Tweet export locked. Upgrade to unlock!")
 
