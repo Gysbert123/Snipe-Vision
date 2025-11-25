@@ -602,26 +602,19 @@ def verify_lemon_order(order_id, customer_email):
         "Authorization": f"Bearer {LEMON_API_KEY}",
     }
     
-    # List orders and filter by order number or email
-    # This is more reliable than direct lookup
+    # Try listing all orders first (no filters) to see if API works
     search_url = "https://api.lemonsqueezy.com/v1/orders"
-    params = {}
-    
-    # Try filtering by order number first
-    if clean_id.isdigit():
-        params["filter[order_number]"] = clean_id
-    
-    # Also filter by email if provided
-    if customer_email:
-        params["filter[user_email]"] = customer_email.lower()
     
     try:
-        response = requests.get(search_url, headers=headers, params=params, timeout=15)
+        # First, try without filters to see if we can access orders at all
+        response = requests.get(search_url, headers=headers, params={"page[size]": 25}, timeout=15)
     except requests.RequestException as exc:
         return False, f"Unable to reach Lemon Squeezy API ({exc})."
 
     if response.status_code == 401:
         return False, "Invalid API key. Check your LEMON_API_KEY in environment variables."
+    if response.status_code == 404:
+        return False, "Orders endpoint not found. Your API key might not have access to orders, or the endpoint has changed."
     if response.status_code >= 400:
         error_text = ""
         try:
@@ -629,25 +622,33 @@ def verify_lemon_order(order_id, customer_email):
             errors = error_data.get("errors", [])
             if errors:
                 error_text = str(errors[0].get("detail", errors[0].get("title", "")))
+            # Also try to get the full error response for debugging
+            if not error_text:
+                error_text = str(error_data)[:200]
         except:
-            pass
+            error_text = response.text[:200] if hasattr(response, 'text') else ""
         return False, f"Lemon Squeezy API error ({response.status_code}). {error_text}"
 
     try:
         payload = response.json()
     except ValueError:
-        return False, f"Unexpected response from Lemon Squeezy. Status: {response.status_code}"
+        return False, f"Unexpected response from Lemon Squeezy. Status: {response.status_code}, Response: {response.text[:200]}"
 
     orders = payload.get("data", [])
     if not orders:
-        return False, f"No orders found matching '{clean_id}'. Make sure you're using the order number from your receipt email (usually 6-8 digits)."
+        return False, f"No orders found in your account. Make sure you've completed a test payment and the order number '{clean_id}' is correct."
     
     # Find the matching order by order number
     matching_order = None
     for order in orders:
         attrs = order.get("attributes", {})
         order_num = str(attrs.get("order_number", ""))
-        if order_num == clean_id or clean_id in order_num:
+        # Try exact match first
+        if order_num == clean_id:
+            matching_order = order
+            break
+        # Also try if the entered number is part of the order number
+        if clean_id in order_num or order_num in clean_id:
             matching_order = order
             break
     
@@ -661,7 +662,9 @@ def verify_lemon_order(order_id, customer_email):
                 break
     
     if not matching_order:
-        return False, f"Order '{clean_id}' not found. Check the order number from your receipt email."
+        # List available order numbers for debugging (first 3 only)
+        available = [str(o.get("attributes", {}).get("order_number", "?")) for o in orders[:3]]
+        return False, f"Order '{clean_id}' not found. Available orders: {', '.join(available)}. Make sure you're using the exact order number from your receipt email."
     
     attributes = matching_order.get("attributes") or {}
     status = (attributes.get("status") or "").lower()
