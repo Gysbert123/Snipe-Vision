@@ -8,7 +8,7 @@ Never Miss Another 10x - Live trading scanner with real charts and tweet-ready s
 - 📊 **Real Charts**: Candlestick charts with EMA indicators
 - 🐦 **Tweet-Ready**: Auto-generated tweet content for sharing
 - 💰 **Freemium Model**: 3 free scans, $5/mo for unlimited
-- 💎 **Dual Payment**: Pay with USDC (Solana) or PayPal subscription
+- 💎 **Dual Payment**: Pay with USDC (Solana) or Lemon Squeezy checkout
 
 ## Payment System
 
@@ -21,8 +21,8 @@ Never Miss Another 10x - Live trading scanner with real charts and tweet-ready s
 - Custom rules engine
 - Tweet exports
 - Two payment options:
-  - **USDC on Solana**: Instant unlock via QR code
-  - **PayPal**: Monthly subscription
+  - **USDC on Solana**: Instant unlock via QR code + on-chain verification
+  - **Lemon Squeezy**: Hosted checkout (cards, Apple Pay, PayPal) with API verification
 
 ## Deployment on Render.com
 
@@ -65,23 +65,18 @@ Never Miss Another 10x - Live trading scanner with real charts and tweet-ready s
    ```
    SOLANA_WALLET_ADDRESS=your_wallet_address
    HELIUS_API_KEY=your_helius_key
-   PAYPAL_CLIENT_ID=your_paypal_client_id
-   PAYPAL_SECRET=your_paypal_secret
-   PAYPAL_MODE=sandbox
+   LEMON_CHECKOUT_URL=https://checkout.lemonsqueezy.com/buy/your-checkout-id
+   LEMON_API_KEY=ls_sk_xxx
+   LEMON_VARIANT_ID=123456
+   SUPABASE_URL=...
+   SUPABASE_SERVICE_ROLE=...
+   SUPABASE_ANON_KEY=...
    ```
 6. Click **"Create Web Service"**
 
 ### Step 3: Set Up Webhooks (Optional)
 
-For automatic payment verification, deploy the webhook service:
-
-1. Create a new **Web Service** on Render
-2. Use the same repo
-3. **Start Command**: `python webhook.py`
-4. **Port**: `5000`
-5. Add webhook URLs to:
-   - **Helius Dashboard**: `https://your-app.onrender.com/webhook/solana`
-   - **PayPal Developer Dashboard**: `https://your-app.onrender.com/webhook/paypal`
+Solana payments are already verified on-chain from the UI. If you prefer to offload verification to a webhook, deploy `webhook.py` as a separate Render service and point Helius to `https://your-app.onrender.com/webhook/solana`.
 
 ### Step 4: Custom Domain (Optional)
 
@@ -123,15 +118,19 @@ streamlit run app.py
 4. Add webhook in Helius dashboard pointing to your Render webhook URL
 5. Set `SOLANA_WALLET_ADDRESS` and `HELIUS_API_KEY` in Render environment variables
 
-### PayPal Setup
+### Lemon Squeezy Setup
 
-1. Go to [PayPal Developer Dashboard](https://developer.paypal.com)
-2. Create a new app (Sandbox for testing, Live for production)
-3. Get your `CLIENT_ID` and `SECRET`
-4. Set up webhook in PayPal dashboard:
-   - URL: `https://your-app.onrender.com/webhook/paypal`
-   - Events: `BILLING.SUBSCRIPTION.*`
-5. Add credentials to Render environment variables
+1. Create a product/variant in [Lemon Squeezy](https://www.lemonsqueezy.com/) for the $5/mo subscription.
+2. Copy the hosted checkout link (format: `https://checkout.lemonsqueezy.com/buy/<checkout-id>`).
+3. In the Lemon Squeezy dashboard, generate an API key (Settings → API).
+4. Optional: note the variant ID from the URL (`.../variants/<id>`); use it to ensure only the correct product unlocks premium.
+5. Add the following to your environment variables:
+   ```
+   LEMON_CHECKOUT_URL=https://checkout.lemonsqueezy.com/buy/<checkout-id>
+   LEMON_API_KEY=ls_sk_xxx
+   LEMON_VARIANT_ID=123456
+   ```
+6. (Optional) Configure success/cancel URLs in Lemon if you want automatic redirects after checkout.
 
 ## How It Works
 
@@ -144,14 +143,14 @@ Assets with a score of 50+ are displayed as hot setups.
 
 ## Test Mode
 
-By default, the app runs in **test/sandbox mode**:
-- PayPal: Uses sandbox credentials (no real charges)
-- Solana: Manual verification (auto-approve in test mode)
+By default, the app runs in **manual verification mode**:
+- Solana payments are checked via the Helius RPC using the transaction signature you paste.
+- Lemon Squeezy orders are verified through the Lemon API when you paste your order ID.
 
-To enable production:
-1. Set `PAYPAL_MODE=live` in environment variables
-2. Use real PayPal credentials
-3. Set up Helius webhook for automatic Solana verification
+To go live:
+1. Use a real Solana wallet + Helius API key.
+2. Point `LEMON_CHECKOUT_URL` at your live Lemon checkout URL and use a production API key.
+3. (Optional) Deploy the webhook service for automated Solana verification.
 
 ## Support
 

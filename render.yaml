@@ -11,10 +11,10 @@ services:
         sync: false
       - key: HELIUS_API_KEY
         sync: false
-      - key: PAYPAL_CLIENT_ID
+      - key: LEMON_CHECKOUT_URL
         sync: false
-      - key: PAYPAL_SECRET
+      - key: LEMON_API_KEY
         sync: false
-      - key: PAYPAL_MODE
-        value: sandbox
+      - key: LEMON_VARIANT_ID
+        sync: false
 

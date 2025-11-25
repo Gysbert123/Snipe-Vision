@@ -52,25 +52,22 @@ The app will open at `http://localhost:8501`
 
 ---
 
-### Test 3: PayPal Payment Flow
+### Test 3: Lemon Squeezy Checkout
 
-1. **Trigger paywall** (use 3 free scans first)
-2. **Click "💳 Subscribe with PayPal"** button
-3. **Verify display**:
-   - ✅ Shows "Test Mode Active" message
-   - ✅ Shows "Simulate PayPal Payment" button
-4. **Click "✅ Simulate PayPal Payment"**
-   - ✅ Should instantly unlock premium
-   - ✅ Shows success message with balloons
-   - ✅ `st.session_state.paid = True`
+1. **Trigger the paywall** (use 3 free scans first).
+2. **Enter your email** (required so we can match the order).
+3. **Click "🍋 Launch Lemon Squeezy Checkout"** (opens in a new tab).
+4. **Complete the checkout** (test mode uses the Lemon sandbox checkout if your account is in test mode).
+5. **Copy the order ID** from the success page or receipt email.
+6. **Back in the app**, paste the order ID into the verification field and click **"✅ Verify Lemon order"**.
 
-**Expected Result**: Instant unlock in test mode, premium features activated.
+**Expected Result**: If the order is paid and matches your email, premium mode unlocks and balloons appear.
 
 ---
 
 ### Test 4: Premium Features After Payment
 
-After unlocking (via PayPal test mode):
+After unlocking (via Solana verification or Lemon Squeezy order):
 
 1. **Unlimited Scans**:
    - Click "🔥 RUN SNIPE SCAN" multiple times
@@ -93,7 +90,7 @@ After unlocking (via PayPal test mode):
 
 ### Test 5: Session Persistence
 
-1. **Unlock premium** (via PayPal test)
+1. **Unlock premium** (via either method)
 2. **Refresh the page** (F5)
    - ⚠️ **Note**: Streamlit session state resets on refresh
    - This is expected behavior (no database yet)
@@ -139,7 +136,7 @@ This simulates successful payment verification.
 - [ ] Paywall appears after 3 scans
 - [ ] USDC payment UI displays correctly
 - [ ] QR code generates and displays
-- [ ] PayPal test mode works (instant unlock)
+- [ ] Lemon Squeezy order verification works
 - [ ] Premium features unlock after payment
 - [ ] Unlimited scans work after payment
 - [ ] Custom rules accessible after payment
@@ -176,14 +173,12 @@ st.write(f"Paid status: {st.session_state.paid}")
 When ready for production:
 
 1. **Set environment variables** in Render:
-   - `PAYPAL_MODE=live` (not sandbox)
-   - Real PayPal credentials
-   - Real Solana wallet address
-   - Helius API key
+   - Real Solana wallet address + Helius API key
+   - Live Lemon Squeezy checkout URL, API key, and variant ID
 
-2. **Deploy webhook service**:
+2. **(Optional) Deploy webhook service**:
    - Deploy `webhook.py` as separate Render service
-   - Add webhook URLs to Helius/PayPal dashboards
+   - Add webhook URL to Helius dashboard if you want push-based verification
 
 3. **Test with real payments**:
    - Use small test amounts first

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import json
 import re
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote_plus
 from ta_indicators import calculate_all_indicators
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from streamlit.web.server.server import Server
@@ -65,6 +65,9 @@ if 'solana_pay_url' not in st.session_state:
 
 if 'solana_signature' not in st.session_state:
     st.session_state.solana_signature = ""
+
+if 'lemon_order_id' not in st.session_state:
+    st.session_state.lemon_order_id = ""
 
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
@@ -585,6 +588,55 @@ def _extract_usdc_received(meta, recipient_wallet):
     return delta
 
 
+def verify_lemon_order(order_id, customer_email):
+    """Verify Lemon Squeezy order via API."""
+    if not order_id:
+        return False, "Enter your Lemon Squeezy order ID."
+    if not LEMON_API_KEY:
+        return False, "LEMON_API_KEY is missing on the server."
+
+    clean_id = str(order_id).strip().lstrip("#")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Content-Type": "application/vnd.api+json",
+        "Authorization": f"Bearer {LEMON_API_KEY}",
+    }
+    url = f"https://api.lemonsqueezy.com/v1/orders/{clean_id}"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+    except requests.RequestException as exc:
+        return False, f"Unable to reach Lemon Squeezy API ({exc})."
+
+    if response.status_code == 404:
+        return False, "Order not found. Double-check the ID from your receipt email."
+    if response.status_code >= 400:
+        return False, f"Lemon Squeezy API error ({response.status_code})."
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return False, "Unexpected response from Lemon Squeezy."
+
+    order_data = (payload or {}).get("data") or {}
+    attributes = order_data.get("attributes") or {}
+    status = (attributes.get("status") or "").lower()
+    if status not in {"paid", "completed"}:
+        return False, f"Order status is '{status}'. It must be paid before unlocking."
+
+    if LEMON_VARIANT_ID:
+        variant_id = str(attributes.get("variant_id") or "")
+        if variant_id != str(LEMON_VARIANT_ID):
+            return False, "That order is for a different product."
+
+    email_on_order = (attributes.get("user_email") or attributes.get("customer_email") or "").lower()
+    if customer_email and email_on_order and email_on_order != customer_email.lower():
+        return False, "Order email does not match the email you entered on SnipeVision."
+
+    attributes["order_id"] = clean_id
+    return True, attributes
+
+
 # Payment verification function
 def verify_payment(identifier, method):
     """Verify payment status by checking the on-chain transaction."""
@@ -638,6 +690,9 @@ SOLANA_DEFAULT_AMOUNT = float(os.getenv("SOLANA_SUB_AMOUNT", "5"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+LEMON_CHECKOUT_URL = os.getenv("LEMON_CHECKOUT_URL", "")
+LEMON_VARIANT_ID = os.getenv("LEMON_VARIANT_ID", "")
+LEMON_API_KEY = os.getenv("LEMON_API_KEY", "")
 
 
 @st.cache_resource(show_spinner=False)
@@ -1599,15 +1654,20 @@ def show_payment_options():
     st.markdown("---")
     st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
     st.markdown("### 💳 Unlock Premium – $5/month")
-    st.markdown("**Send $5 USDC on Solana to unlock unlimited scans, custom rules, and tweet exports.**")
+    st.markdown("**Pick the payment method that works best for you.**")
 
-    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
     amount_usdc = SOLANA_DEFAULT_AMOUNT
+    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+    email_value = st.session_state.user_email.strip()
 
-    if not st.session_state.user_email.strip():
-        st.warning("Enter your email above so we can tie the unlock to your account.")
+    if not email_value:
+        st.warning("Enter your email above so we can tie the unlock to your account and restore access later.")
         st.markdown("</div>", unsafe_allow_html=True)
         return
+
+    # ------------------- OPTION A: SOLANA -------------------
+    st.markdown("#### Option A — Solana USDC (instant unlock)")
+    st.caption("Use Phantom, Solflare, Backpack, or any Solana wallet. Send $5 USDC to the address below and paste the transaction signature.")
 
     if st.session_state.solana_pay_url is None or st.session_state.solana_reference is None:
         sol_url, reference = generate_solana_pay_request()
@@ -1617,13 +1677,12 @@ def show_payment_options():
     sol_pay_url = st.session_state.solana_pay_url
     reference = st.session_state.solana_reference
 
-    st.markdown("#### 1. Send the $5 USDC payment")
     info_cols = st.columns([1, 1])
     with info_cols[0]:
         st.write(f"**Recipient wallet:** `{recipient}`")
         st.write(f"**Memo / reference:** `{reference}`")
-        st.write(f"**Amount:** {amount_usdc} USDC (SPL)")
-        st.markdown("Scan the QR with Phantom/Solflare **or** paste the Solana Pay URL below into your wallet.")
+        st.write(f"**Amount:** {amount_usdc} USDC (SPL token)")
+        st.markdown("Scan the QR below **or** copy the Solana Pay link into your wallet.")
     with info_cols[1]:
         try:
             qr = qrcode.QRCode(version=1, box_size=7, border=4)
@@ -1639,16 +1698,14 @@ def show_payment_options():
 
     st.markdown("**Solana Pay URL:**")
     st.code(sol_pay_url, language=None)
-    st.caption("Tip: Copy this URL, open Phantom/Solflare → Settings → Solana Pay → Paste URL.")
+    st.caption("Tip: In Phantom → Settings → Solana Pay → 'Paste from clipboard'.")
 
-    st.markdown("#### 2. Paste the transaction signature")
     st.session_state.solana_signature = st.text_input(
         "Transaction signature",
         value=st.session_state.solana_signature,
-        placeholder="5YkK3d... (found in your wallet after sending USDC)",
+        placeholder="5YkK3d... (shown in your wallet after sending USDC)",
     )
 
-    st.markdown("#### 3. Verify on-chain")
     verify_col, refresh_col = st.columns([2, 1])
     with verify_col:
         if st.button("✅ I've paid – verify USDC", key="verify_solana", use_container_width=True):
@@ -1656,7 +1713,7 @@ def show_payment_options():
             if ok:
                 st.session_state.paid = True
                 save_subscription_record(
-                    st.session_state.user_email.strip(),
+                    email_value,
                     st.session_state.user_wallet.strip(),
                     st.session_state.solana_signature.strip(),
                     amount_usdc,
@@ -1673,6 +1730,48 @@ def show_payment_options():
             st.session_state.solana_pay_url = None
             st.session_state.solana_reference = None
             st.rerun()
+
+    # ------------------- OPTION B: LEMON SQUEEZY -------------------
+    st.markdown("#### Option B — Lemon Squeezy checkout (card / PayPal / Apple Pay)")
+    if LEMON_CHECKOUT_URL:
+        st.caption("Secure hosted checkout powered by Lemon Squeezy. After paying, paste your order ID below so we can verify automatically via API.")
+        checkout_link = LEMON_CHECKOUT_URL
+        encoded_email = quote_plus(email_value) if email_value else ""
+        if encoded_email:
+            sep = "&" if "?" in checkout_link else "?"
+            checkout_link = f"{checkout_link}{sep}checkout[email]={encoded_email}"
+        st.markdown(
+            f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>🍋 Launch Lemon Squeezy Checkout</a>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Need help finding your order ID? Check the receipt email or the success page after checkout.")
+
+        st.session_state.lemon_order_id = st.text_input(
+            "Lemon Squeezy order ID",
+            value=st.session_state.lemon_order_id,
+            placeholder="e.g. 123456",
+        )
+
+        if st.button("✅ Verify Lemon order", key="verify_lemon", use_container_width=True):
+            ok, payload = verify_lemon_order(st.session_state.lemon_order_id, email_value)
+            if ok:
+                total_cents = payload.get("total") or 0
+                total_amount = float(total_cents) / 100.0 if total_cents else amount_usdc
+                reference = f"lemon-{payload.get('order_id')}"
+                save_subscription_record(
+                    email_value,
+                    "",
+                    reference,
+                    total_amount,
+                )
+                st.session_state.paid = True
+                st.session_state.lemon_order_id = ""
+                st.success("✅ Premium unlocked via Lemon Squeezy! Welcome to unlimited mode.")
+                st.balloons()
+            else:
+                st.warning(payload)
+    else:
+        st.info("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
