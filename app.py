@@ -588,6 +588,24 @@ def _extract_usdc_received(meta, recipient_wallet):
     return delta
 
 
+def _extract_variant_id(order_data, attributes):
+    """Best-effort extraction of variant id from Lemon order payload."""
+    if not order_data:
+        order_data = {}
+    if attributes is None:
+        attributes = {}
+
+    variant_id = attributes.get("variant_id")
+    if not variant_id:
+        relationships = order_data.get("relationships") or {}
+        variant_rel = relationships.get("variant") or {}
+        variant_data = variant_rel.get("data") or {}
+        variant_id = variant_data.get("id")
+    if variant_id is None:
+        return ""
+    return str(variant_id)
+
+
 def verify_lemon_order(order_id, customer_email):
     """Verify Lemon Squeezy order via API by listing and filtering orders."""
     if not order_id:
@@ -668,13 +686,16 @@ def verify_lemon_order(order_id, customer_email):
         return False, f"Order '{clean_id}' not found. Available orders: {', '.join(available)}. Make sure you're using the exact order number from your receipt email."
     
     attributes = matching_order.get("attributes") or {}
+    variant_id = _extract_variant_id(matching_order, attributes)
     status = (attributes.get("status") or "").lower()
     if status not in {"paid", "completed"}:
         return False, f"Order status is '{status}'. It must be paid before unlocking."
 
-    if LEMON_VARIANT_ID:
-        variant_id = str(attributes.get("variant_id") or "")
-        if variant_id != str(LEMON_VARIANT_ID):
+    required_variant = str(LEMON_VARIANT_ID).strip()
+    if required_variant:
+        if not variant_id:
+            st.warning("Variant ID missing from Lemon response; skipping variant check.")
+        elif variant_id != required_variant:
             return False, f"That order is for a different product (variant {variant_id})."
 
     email_on_order = (attributes.get("user_email") or attributes.get("customer_email") or "").lower()
@@ -742,6 +763,7 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 LEMON_CHECKOUT_URL = os.getenv("LEMON_CHECKOUT_URL", "")
 LEMON_VARIANT_ID = os.getenv("LEMON_VARIANT_ID", "")
 LEMON_API_KEY = os.getenv("LEMON_API_KEY", "")
+WEBHOOK_STATUS_URL = os.getenv("WEBHOOK_STATUS_URL", "")
 
 
 @st.cache_resource(show_spinner=False)
@@ -803,6 +825,23 @@ def check_webhook_payment(email):
         except Exception:
             pass
     
+    # Fallback: query webhook service if available
+    if WEBHOOK_STATUS_URL:
+        try:
+            url = f"{WEBHOOK_STATUS_URL.rstrip('/')}/payment/check-email/{quote_plus(email.lower())}"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("verified"):
+                    payment = data.get("payment", {})
+                    # Persist for current app session
+                    reference = payment.get("reference") or payment.get("order_number") or f"lemon-{email}"
+                    amount = float(payment.get("amount", SOLANA_DEFAULT_AMOUNT))
+                    save_subscription_record(email, "", reference, amount)
+                    return True, payment
+        except Exception:
+            pass
+
     return False, None
 
 def check_subscription_status(identifier):

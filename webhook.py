@@ -92,7 +92,13 @@ def lemon_webhook():
             status = (attributes.get('status') or '').lower()
             user_email = (attributes.get('user_email') or attributes.get('customer_email') or '').lower()
             total = attributes.get('total', 0)
-            variant_id = str(attributes.get('variant_id', ''))
+            variant_id = attributes.get('variant_id')
+            if not variant_id:
+                relationships = order_data.get('relationships') or {}
+                variant_rel = relationships.get('variant') or {}
+                variant_data = variant_rel.get('data') or {}
+                variant_id = variant_data.get('id')
+            variant_id = str(variant_id) if variant_id is not None else ''
             
             # Only process paid/completed orders
             if status in ['paid', 'completed']:
