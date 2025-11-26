@@ -1902,57 +1902,15 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                 
                 if error:
                     st.error(error)
+                    st.session_state.last_custom_results = None
                 elif results:
-                    st.success(f"✅ Found {len(results)} assets matching your custom rules!")
-                    
-                    for r in results:
-                        sym_key = f"tv_toggle_{r['sym']}"
-                        if sym_key not in st.session_state:
-                            st.session_state[sym_key] = False
-                        
-                        c1, c2 = st.columns([3, 1])
-                        
-                        with c1:
-                            fig_obj = r.get("figure")
-                            if isinstance(fig_obj, dict):
-                                fig_obj = go.Figure(fig_obj)
-                            if fig_obj is not None:
-                                st.plotly_chart(fig_obj, use_container_width=True)
-                            
-                            # TradingView toggle button
-                            tv_col1, tv_col2 = st.columns([1, 4])
-                            with tv_col1:
-                                if st.button("📊 TradingView", key=f"tv_btn_{r['sym']}", use_container_width=True):
-                                    st.session_state[sym_key] = not st.session_state[sym_key]
-                                    st.rerun()
-                            
-                            if st.session_state[sym_key]:
-                                # Map cleaned symbol (e.g., "BTC") to TradingView format ("BTCUSD")
-                                tv_symbol = map_to_tradingview_symbol(r['sym'])
-                                st.markdown("**📊 Interactive TradingView Chart (with drawing tools):**")
-                                render_tradingview_widget(tv_symbol, height=620)
-                        
-                        with c2:
-                            delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
-                            st.metric(
-                                f"{r['sym']} • {r.get('timeframe', '1D (Daily)')}",
-                                f"Score: {r['score']}/100",
-                                delta=delta_text,
-                            )
-                            st.write(f"**Last Price:** ${r.get('price', 0):,.2f}")
-                            st.write(f"**Bias:** {r.get('bias', 'Neutral')} • **Call:** {r.get('action', 'Monitor')}")
-                            st.markdown(f"**AI read:** {r.get('narrative', 'Matches your custom rules.')}")                        
-                            st.write("**Signals:**")
-                            for signal in r["signals"]:
-                                st.write(f"• {signal}")
-                            st.markdown(f"**💡 Signal details:** {r['explanation']}")
-                            
-                            # Tweet export
-                            tweet = f"🏹 SnipeVision Custom Rules found {r['sym']} → {', '.join(r['signals'])} | {r['explanation']}\nhttps://snipevision.xyz"
-                            st.code(tweet, language=None)
-                            render_copy_button(tweet, f"custom_copy_{r['sym']}")
+                    # Store results in session state so they persist across reruns
+                    st.session_state.last_custom_results = results
+                    st.session_state.last_custom_universe = custom_universe
+                    st.rerun()  # Rerun to show results from session state
                 else:
                     st.warning("No assets found matching your custom rules. Try adjusting your criteria.")
+                    st.session_state.last_custom_results = None
                 
                 if debug_info.get("rule_labels"):
                     st.markdown("#### Rule Coverage Across Universe")
@@ -2085,6 +2043,63 @@ def scan(universe_key: str):
 
 st.markdown("---")
 
+# Display last scan results if they exist (persists across reruns)
+if 'last_scan_results' in st.session_state and st.session_state.last_scan_results:
+    st.success(f"✅ Found {len(st.session_state.last_scan_results)} hot setups in the {st.session_state.last_scan_universe.lower()} universe!")
+    
+    for r in st.session_state.last_scan_results:
+        sym_key = f"tv_toggle_{r['sym']}"
+        if sym_key not in st.session_state:
+            st.session_state[sym_key] = False
+        
+        c1, c2 = st.columns([3, 1])
+        
+        with c1: 
+            fig_obj = r.get("figure")
+            if isinstance(fig_obj, dict):
+                fig_obj = go.Figure(fig_obj)
+            if fig_obj is not None:
+                st.plotly_chart(fig_obj, use_container_width=True)
+            
+            # TradingView toggle button
+            tv_col1, tv_col2 = st.columns([1, 4])
+            with tv_col1:
+                if st.button("📊 TradingView", key=f"tv_btn_{r['sym']}", use_container_width=True):
+                    st.session_state[sym_key] = not st.session_state[sym_key]
+                    st.rerun()
+            
+            if st.session_state[sym_key]:
+                # Map cleaned symbol (e.g., "BTC") to TradingView format ("BTCUSD")
+                tv_symbol = map_to_tradingview_symbol(r['sym'])
+                st.markdown("**📊 Interactive TradingView Chart (with drawing tools):**")
+                render_tradingview_widget(tv_symbol, height=620)
+        
+        with c2:
+            delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
+            st.metric(
+                f"{r['sym']} • {r.get('timeframe', '1D (Daily)')}",
+                f"{r['score']}/100",
+                delta=delta_text,
+            )
+            st.write(f"**Last Price:** ${r.get('price', 0):,.2f}")
+            st.write(f"**Bias:** {r.get('bias', 'Neutral')} • **Call:** {r.get('action', 'Monitor')}")
+            st.markdown(f"**AI read:** {r.get('narrative', 'High-probability setup spotted.')}")                
+            if r["signals"]:
+                st.write("**Signals:**")
+                for sig in r["signals"]:
+                    st.write(f"• {sig}")
+            else:
+                st.write("No individual signals provided.")
+            
+            # Tweet export (unlocked for paid users or first 3 scans)
+            if st.session_state.paid or st.session_state.scans <= 3:
+                tweet = f"🏹 SnipeVision just found {r['sym']} ({r.get('timeframe','1D')}) → {' • '.join(r['signals'])} | Score {r['score']}/100\nhttps://snipevision.xyz"
+                st.code(tweet, language=None)
+                render_copy_button(tweet, f"copy_{r['sym']}")
+            else:
+                st.info("🔒 Tweet export locked. Upgrade to unlock!")
+    st.markdown("---")
+
 if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
     email_identifier = st.session_state.user_email.strip()
     free_count = get_free_scan_count(email_identifier) if email_identifier else st.session_state.scans
@@ -2115,60 +2130,11 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
         
         with st.spinner(f"🔍 Scanning the {scan_universe.lower()} universe..."):
             top = scan(scan_universe)
+            # Store results in session state so they persist across reruns
+            st.session_state.last_scan_results = top
+            st.session_state.last_scan_universe = scan_universe
         
-        st.success(f"✅ Found {len(top)} hot setups in the {scan_universe.lower()} universe!")
-        
-        for r in top:
-            sym_key = f"tv_toggle_{r['sym']}"
-            if sym_key not in st.session_state:
-                st.session_state[sym_key] = False
-            
-            c1, c2 = st.columns([3, 1])
-            
-            with c1: 
-                fig_obj = r.get("figure")
-                if isinstance(fig_obj, dict):
-                    fig_obj = go.Figure(fig_obj)
-                if fig_obj is not None:
-                    st.plotly_chart(fig_obj, use_container_width=True)
-                
-                # TradingView toggle button
-                tv_col1, tv_col2 = st.columns([1, 4])
-                with tv_col1:
-                    if st.button("📊 TradingView", key=f"tv_btn_{r['sym']}", use_container_width=True):
-                        st.session_state[sym_key] = not st.session_state[sym_key]
-                        st.rerun()
-                
-                if st.session_state[sym_key]:
-                    # Map cleaned symbol (e.g., "BTC") to TradingView format ("BTCUSD")
-                    tv_symbol = map_to_tradingview_symbol(r['sym'])
-                    st.markdown("**📊 Interactive TradingView Chart (with drawing tools):**")
-                    render_tradingview_widget(tv_symbol, height=620)
-            
-            with c2:
-                delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
-                st.metric(
-                    f"{r['sym']} • {r.get('timeframe', '1D (Daily)')}",
-                    f"{r['score']}/100",
-                    delta=delta_text,
-                )
-                st.write(f"**Last Price:** ${r.get('price', 0):,.2f}")
-                st.write(f"**Bias:** {r.get('bias', 'Neutral')} • **Call:** {r.get('action', 'Monitor')}")
-                st.markdown(f"**AI read:** {r.get('narrative', 'High-probability setup spotted.')}")                
-                if r["signals"]:
-                    st.write("**Signals:**")
-                    for sig in r["signals"]:
-                        st.write(f"• {sig}")
-                else:
-                    st.write("No individual signals provided.")
-                
-                # Tweet export (unlocked for paid users or first 3 scans)
-                if st.session_state.paid or st.session_state.scans <= 3:
-                    tweet = f"🏹 SnipeVision just found {r['sym']} ({r.get('timeframe','1D')}) → {' • '.join(r['signals'])} | Score {r['score']}/100\nhttps://snipevision.xyz"
-                    st.code(tweet, language=None)
-                    render_copy_button(tweet, f"copy_{r['sym']}")
-                else:
-                    st.info("🔒 Tweet export locked. Upgrade to unlock!")
+        st.rerun()  # Rerun to show results from session state
 
 st.caption("SnipeVision • Built with Cursor • Manual TA is dead 2025")
 st.markdown(
