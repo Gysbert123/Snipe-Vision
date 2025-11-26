@@ -3,11 +3,9 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
-from io import BytesIO
 import base64
 import html
 import os
-import qrcode
 import time
 import requests
 from datetime import datetime, timedelta
@@ -24,14 +22,6 @@ except ImportError:
     create_client = None
 
 # Payment imports
-try:
-    from solders.keypair import Keypair
-    from solders.pubkey import Pubkey
-    from solana.rpc.api import Client
-    SOLANA_AVAILABLE = True
-except ImportError:
-    SOLANA_AVAILABLE = False
-
 try:
     import stripe
     STRIPE_AVAILABLE = True
@@ -57,26 +47,62 @@ if 'show_custom_rules' not in st.session_state:
 if 'show_tweet_info' not in st.session_state:
     st.session_state.show_tweet_info = False
 
-if 'solana_reference' not in st.session_state:
-    st.session_state.solana_reference = None
-
-if 'solana_pay_url' not in st.session_state:
-    st.session_state.solana_pay_url = None
-
-if 'solana_signature' not in st.session_state:
-    st.session_state.solana_signature = ""
-
 if 'lemon_order_id' not in st.session_state:
     st.session_state.lemon_order_id = ""
 
 if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 
-if 'user_wallet' not in st.session_state:
-    st.session_state.user_wallet = ""
-
 if 'subscription_lookup' not in st.session_state:
     st.session_state.subscription_lookup = ""
+
+SUBSCRIPTION_PRICE = float(os.getenv("SUBSCRIPTION_AMOUNT", "5"))
+SUBSCRIPTION_PRICE_LABEL = f"${SUBSCRIPTION_PRICE:,.2f}"
+
+def _dedupe_symbols(symbols):
+    seen = set()
+    ordered = []
+    for sym in symbols:
+        if sym not in seen:
+            seen.add(sym)
+            ordered.append(sym)
+    return ordered
+
+
+TOP_CRYPTO_SYMBOLS = [
+    "BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","MATIC-USD","LINK-USD","BNB-USD",
+    "DOT-USD","LTC-USD","ATOM-USD","FIL-USD","OP-USD","ARB-USD","PEPE-USD","BONK-USD","TIA-USD","RUNE-USD",
+]
+EMERGING_CRYPTO_SYMBOLS = [
+    "SUI-USD","APT-USD","INJ-USD","AAVE-USD","PYTH-USD","IMX-USD","NEAR-USD","HBAR-USD","SEI-USD","WIF-USD",
+]
+TOP_STOCK_SYMBOLS = [
+    "NVDA","TSLA","AAPL","MSFT","GOOGL","AMZN","META","NFLX","AMD","SMCI",
+    "AVGO","ASML","SHOP","SNOW","UBER","PLTR","COIN","MARA","RIOT","SQ",
+]
+GROWTH_STOCK_SYMBOLS = [
+    "CELH","CRWD","SPOT","ROKU","ABNB","PYPL","AI","NIO","OXY","ARKK",
+]
+
+CUSTOM_CRYPTO_SYMBOLS = _dedupe_symbols(TOP_CRYPTO_SYMBOLS + EMERGING_CRYPTO_SYMBOLS + [
+    "HBAR-USD","XLM-USD","VET-USD","GRT-USD","ALGO-USD","ETC-USD","TRX-USD","FLOW-USD","SAND-USD","GALA-USD",
+])
+CUSTOM_STOCK_SYMBOLS = _dedupe_symbols(TOP_STOCK_SYMBOLS + GROWTH_STOCK_SYMBOLS + [
+    "BABA","DIS","NVDA","MSFT","META","AMAT","NVDS","TQQQ","IWM","QQQ",
+])
+CUSTOM_ALL_SYMBOLS = _dedupe_symbols(CUSTOM_CRYPTO_SYMBOLS + CUSTOM_STOCK_SYMBOLS)
+
+QUICK_SNIPE_UNIVERSES = {
+    "All": _dedupe_symbols(TOP_CRYPTO_SYMBOLS + TOP_STOCK_SYMBOLS),
+    "Crypto": TOP_CRYPTO_SYMBOLS,
+    "Stocks": TOP_STOCK_SYMBOLS,
+}
+
+CUSTOM_RULE_UNIVERSES = {
+    "All": CUSTOM_ALL_SYMBOLS,
+    "Crypto": CUSTOM_CRYPTO_SYMBOLS,
+    "Stocks": CUSTOM_STOCK_SYMBOLS,
+}
 
 if 'free_scans' not in st.session_state:
     st.session_state.free_scans = 0
@@ -223,14 +249,14 @@ Last updated: 24 November 2025
 
 
 def render_refund_page():
-    content = """
+    content = f"""
 # Refund Policy – SnipeVision
 
 Last updated: 24 November 2025
 
 <div class='static-card'>
 <ul>
-<li>Monthly subscriptions ($5/month) are non-refundable for the current billing period.</li>
+<li>Monthly subscriptions ({SUBSCRIPTION_PRICE_LABEL} per month) are non-refundable for the current billing period.</li>
 <li>You can cancel anytime — no further charges.</li>
 <li>If you accidentally subscribed twice or were charged in error, contact support within 7 days at <a href="mailto:hello@snipevision.xyz">hello@snipevision.xyz</a> with your transaction ID and we’ll issue a full refund.</li>
 <li>No refunds for partial months or usage.</li>
@@ -242,7 +268,7 @@ Last updated: 24 November 2025
 
 
 def render_pricing_page():
-    content = """
+    content = f"""
 # Pricing – SnipeVision
 
 Last updated: 24 November 2025
@@ -257,12 +283,12 @@ Last updated: 24 November 2025
 </div>
 
 <div class='static-card'>
-<h3>Premium – $5/month</h3>
+<h3>Premium – {SUBSCRIPTION_PRICE_LABEL}/month</h3>
 <ul>
 <li>Unlimited Quick Snipe scans</li>
 <li>Custom rule engine (50+ indicators)</li>
 <li>Full-resolution charts + tweet exports</li>
-<li>Pay with Solana USDC via connected wallet</li>
+        <li>Instant Lemon Squeezy checkout - card, Apple Pay, PayPal</li>
 </ul>
 </div>
 
@@ -445,7 +471,7 @@ with hero_left:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("""
+    st.markdown(f"""
     <div class='hero-stats'>
         <div class='hero-stat'>
             <span>ASSETS WATCHED</span>
@@ -461,7 +487,7 @@ with hero_left:
         </div>
         <div class='hero-stat'>
             <span>PREMIUM</span>
-            <strong>$5/mo</strong>
+            <strong>{SUBSCRIPTION_PRICE_LABEL}/mo</strong>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -475,7 +501,7 @@ with hero_right:
             <li>Animated candlestick radar with matrix scanlines</li>
             <li>AI breakdown: buy / sell / hedge bias on every hit</li>
             <li>Tweet-ready copy + premium charts exported instantly</li>
-            <li>USDC (Solana) wallet payment unlocks in seconds</li>
+            <li>Lemon Squeezy auto-verification unlocks in seconds</li>
         </ul>
         <p class='matrix-hint'>tap a module below and violate resistance</p>
     </div>
@@ -538,54 +564,6 @@ def render_copy_button(tweet_text, element_id):
         """,
         unsafe_allow_html=True,
     )
-
-
-def _extract_usdc_received(meta, recipient_wallet):
-    """Return the USDC amount (in tokens) received by recipient in this transaction."""
-    def _read_balance(entries):
-        if not entries:
-            return 0.0
-        for entry in entries:
-            owner = entry.get("owner") or entry.get("accountOwner")
-            if owner == recipient_wallet and entry.get("mint") == SOLANA_USDC_MINT:
-                token_info = entry.get("uiTokenAmount") or {}
-                ui_amount = token_info.get("uiAmount")
-                if ui_amount is not None:
-                    try:
-                        return float(ui_amount)
-                    except (TypeError, ValueError):
-                        return 0.0
-                raw_amount = token_info.get("amount")
-                decimals = token_info.get("decimals", 0)
-                if raw_amount is not None:
-                    try:
-                        return float(raw_amount) / (10 ** decimals)
-                    except (TypeError, ValueError):
-                        return 0.0
-        return 0.0
-
-    pre_amount = _read_balance(meta.get("preTokenBalances"))
-    post_amount = _read_balance(meta.get("postTokenBalances"))
-    delta = post_amount - pre_amount
-
-    # Fallback to tokenBalanceChanges (Helius extension) if delta is zero
-    if delta <= 0:
-        for change in meta.get("tokenBalanceChanges", []) or []:
-            if change.get("userAccount") == recipient_wallet and change.get("mint") == SOLANA_USDC_MINT:
-                raw = change.get("rawTokenAmount") or {}
-                if "tokens" in raw:
-                    try:
-                        return float(raw["tokens"])
-                    except (TypeError, ValueError):
-                        continue
-                amount = raw.get("amount")
-                decimals = raw.get("decimals", 0)
-                if amount is not None:
-                    try:
-                        return float(amount) / (10 ** decimals)
-                    except (TypeError, ValueError):
-                        continue
-    return delta
 
 
 def _extract_variant_id(order_data, attributes):
@@ -707,56 +685,6 @@ def verify_lemon_order(order_id, customer_email):
     return True, attributes
 
 
-# Payment verification function
-def verify_payment(identifier, method):
-    """Verify payment status by checking the on-chain transaction."""
-    if method != "solana":
-        return False, "Unsupported payment method."
-
-    signature = (identifier or "").strip()
-    if not signature:
-        return False, "Paste the Solana transaction signature from your wallet."
-
-    helius_api = os.getenv("HELIUS_API_KEY", "")
-    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
-    if not helius_api:
-        return False, "Helius API key is missing on the server."
-    if not recipient:
-        return False, "Recipient wallet address is not configured."
-
-    endpoint = f"https://mainnet.helius-rpc.com/?api-key={helius_api}"
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getTransaction",
-        "params": [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
-    }
-
-    try:
-        response = requests.post(endpoint, json=payload, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as exc:
-        return False, f"Unable to reach Helius RPC ({exc})."
-    except ValueError:
-        return False, "Unexpected response from Helius RPC."
-
-    tx = data.get("result")
-    if not tx:
-        return False, "Transaction not found yet. Give it 5-10 seconds and try again."
-
-    meta = tx.get("meta") or {}
-    if meta.get("err") is not None:
-        return False, "Transaction failed on-chain."
-
-    received_amount = _extract_usdc_received(meta, recipient)
-    if received_amount >= SOLANA_DEFAULT_AMOUNT - 0.01:
-        return True, f"Detected {received_amount:.2f} USDC sent to SnipeVision."
-
-    return False, f"Found only {received_amount:.2f} USDC routed to the recipient. Double-check the signature."
-
-SOLANA_USDC_MINT = os.getenv("SOLANA_USDC_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
-SOLANA_DEFAULT_AMOUNT = float(os.getenv("SOLANA_SUB_AMOUNT", "5"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -764,8 +692,6 @@ LEMON_CHECKOUT_URL = os.getenv("LEMON_CHECKOUT_URL", "")
 LEMON_VARIANT_ID = os.getenv("LEMON_VARIANT_ID", "")
 LEMON_API_KEY = os.getenv("LEMON_API_KEY", "")
 WEBHOOK_STATUS_URL = os.getenv("WEBHOOK_STATUS_URL", "")
-
-
 @st.cache_resource(show_spinner=False)
 def get_supabase_client():
     if not create_client:
@@ -836,7 +762,7 @@ def check_webhook_payment(email):
                     payment = data.get("payment", {})
                     # Persist for current app session
                     reference = payment.get("reference") or payment.get("order_number") or f"lemon-{email}"
-                    amount = float(payment.get("amount", SOLANA_DEFAULT_AMOUNT))
+                    amount = float(payment.get("amount", SUBSCRIPTION_PRICE))
                     save_subscription_record(email, "", reference, amount)
                     return True, payment
         except Exception:
@@ -895,133 +821,6 @@ def increment_free_scan_count(email):
         client.table("free_usage").upsert(payload, on_conflict="email").execute()
     except Exception:
         pass
-
-
-def generate_solana_pay_request(amount=SOLANA_DEFAULT_AMOUNT):
-    """Generate Solana Pay transaction request URL + reference"""
-    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
-    label = "SnipeVision Premium"
-    message = "Unlock unlimited scans"
-    memo = f"SnipeVision-{int(time.time())}"
-
-    # Reference must be unique so webhook can identify payment
-    if SOLANA_AVAILABLE:
-        reference = str(Keypair().public_key)
-    else:
-        reference = secrets.token_hex(16)
-
-    params = {
-        "amount": amount,
-        "spl-token": SOLANA_USDC_MINT,
-        "reference": reference,
-        "label": label,
-        "message": message,
-        "memo": memo,
-    }
-
-    query = urlencode(params)
-    solana_url = f"solana:{recipient}?{query}"
-    
-    return solana_url, reference
-
-
-def create_wallet_connection_script():
-    """Generate JavaScript for wallet connection"""
-    return """
-    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-    <script>
-    window.connectWallet = async function(walletType) {
-        try {
-            let provider = null;
-            
-            if (walletType === 'phantom') {
-                if (window.solana && window.solana.isPhantom) {
-                    provider = window.solana;
-                } else {
-                    alert('Phantom wallet not found! Please install Phantom extension.');
-                    return null;
-                }
-            } else if (walletType === 'solflare') {
-                if (window.solflare) {
-                    provider = window.solflare;
-                } else {
-                    alert('Solflare wallet not found! Please install Solflare extension.');
-                    return null;
-                }
-            }
-            
-            if (!provider) {
-                alert('Wallet not found!');
-                return null;
-            }
-            
-            // Connect to wallet
-            const response = await provider.connect();
-            const address = response.publicKey.toString();
-            
-            // Store in Streamlit
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: {connected: true, address: address, wallet: walletType}
-            }, '*');
-            
-            return address;
-        } catch (err) {
-            console.error('Wallet connection error:', err);
-            alert('Failed to connect wallet: ' + err.message);
-            return null;
-        }
-    };
-    
-    window.sendPayment = async function(recipient, amount, tokenMint) {
-        try {
-            let provider = null;
-            if (window.solana && window.solana.isPhantom) {
-                provider = window.solana;
-            } else if (window.solflare) {
-                provider = window.solflare;
-            }
-            
-            if (!provider || !provider.publicKey) {
-                alert('Please connect your wallet first!');
-                return false;
-            }
-            
-            const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = window.solanaWeb3;
-            
-            // For USDC (SPL token), we need to use SPL Token program
-            // This is a simplified version - in production, use @solana/spl-token
-            const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-            const fromPubkey = provider.publicKey;
-            const toPubkey = new PublicKey(recipient);
-            
-            // For now, send SOL as a simple transaction
-            // For USDC, you'd need to use SPL Token transfer
-            const transaction = new Transaction().add(
-                SystemProgram.transfer({
-                    fromPubkey: fromPubkey,
-                    toPubkey: toPubkey,
-                    lamports: amount * LAMPORTS_PER_SOL, // Convert to lamports
-                })
-            );
-            
-            const signature = await provider.sendTransaction(transaction, connection);
-            await connection.confirmTransaction(signature, 'confirmed');
-            
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: {paymentSent: true, signature: signature}
-            }, '*');
-            
-            return signature;
-        } catch (err) {
-            console.error('Payment error:', err);
-            alert('Payment failed: ' + err.message);
-            return null;
-        }
-    };
-    </script>
-    """
 
 
 def parse_custom_rules(rule_text):
@@ -1324,28 +1123,26 @@ def build_ai_summary(symbol, timeframe, score, price, change_pct, bias, signals,
         f"{action}.{context}"
     ).strip()
 
-def scan_with_custom_rules(custom_rules_text):
+def scan_with_custom_rules(custom_rules_text, universe_key="All"):
     """Scan market with custom rules - supports 50+ indicators, 5-rule limit"""
     results = []
-    # Expanded symbol list (up to 500 for speed)
-    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","MATIC-USD","LINK-USD","BNB-USD",
-               "DOT-USD","UNI-USD","LTC-USD","ATOM-USD","ETC-USD","ALGO-USD","FIL-USD","TRX-USD","XLM-USD","VET-USD",
-               "NVDA","TSLA","AAPL","MSFT","GOOGL","AMZN","META","NFLX","AMD","SMCI","COIN","MARA","RIOT"]
+    symbols = CUSTOM_RULE_UNIVERSES.get(universe_key, CUSTOM_ALL_SYMBOLS)
+    scan_targets = symbols[:500]
+    total_targets = len(scan_targets)
     
     # Parse rules
     rules = parse_custom_rules(custom_rules_text)
     rule_labels = [rule_to_label(r) for r in rules]
     rule_tally = [0] * len(rules)
-    processed = 0
     
     # Check 5-rule limit
     if len(rules) > 5:
-        return [], f"Maximum 5 rules allowed. You entered {len(rules)} rules. Please reduce to 5 or fewer.", {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": processed}
+        return [], f"Maximum 5 rules allowed. You entered {len(rules)} rules. Please reduce to 5 or fewer.", {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": total_targets}
     
     if not rules:
-        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average AND Price above 200 EMA'", {"rule_labels": [], "rule_tally": [], "total_symbols": processed}
+        return [], "Could not parse rules. Try: 'RSI < 30 AND Volume > 2x average AND Price above 200 EMA'", {"rule_labels": [], "rule_tally": [], "total_symbols": total_targets}
     
-    for sym in symbols[:500]:  # Limit to 500 for speed
+    for sym in scan_targets:
         try:
             # Download data - use up to 2 years to ensure EMA/indicator coverage
             df = yf.download(sym, period="2y", interval="1d", progress=False, auto_adjust=False)
@@ -1758,22 +1555,18 @@ def scan_with_custom_rules(custom_rules_text):
                     "price": price_val,
                     "change_pct": change_pct,
                 })
-            processed += 1
         except Exception as e:
             pass
     
-    debug_summary = {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": processed}
+    debug_summary = {"rule_labels": rule_labels, "rule_tally": rule_tally, "total_symbols": total_targets}
     return sorted(results, key=lambda x: x["score"], reverse=True), None, debug_summary
 
 # Show payment options
 def show_payment_options():
     st.markdown("---")
     st.markdown("<div class='paywall-box'>", unsafe_allow_html=True)
-    st.markdown("### 💳 Unlock Premium – $5/month")
-    st.markdown("**Pick the payment method that works best for you.**")
-
-    amount_usdc = SOLANA_DEFAULT_AMOUNT
-    recipient = os.getenv("SOLANA_WALLET_ADDRESS", "YourSolanaWalletAddressHere")
+    st.markdown(f"### Unlock Premium - {SUBSCRIPTION_PRICE_LABEL}/month")
+    st.markdown("**Secure Lemon Squeezy checkout unlocks unlimited snipes, custom rules, and neon tweet exports.**")
     email_value = st.session_state.user_email.strip()
 
     if not email_value:
@@ -1781,132 +1574,78 @@ def show_payment_options():
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    # ------------------- OPTION A: SOLANA -------------------
-    st.markdown("#### Option A — Solana USDC (instant unlock)")
-    st.caption("Use Phantom, Solflare, Backpack, or any Solana wallet. Send $5 USDC to the address below and paste the transaction signature.")
-
-    if st.session_state.solana_pay_url is None or st.session_state.solana_reference is None:
-        sol_url, reference = generate_solana_pay_request()
-        st.session_state.solana_pay_url = sol_url
-        st.session_state.solana_reference = reference
-
-    sol_pay_url = st.session_state.solana_pay_url
-    reference = st.session_state.solana_reference
-
-    info_cols = st.columns([1, 1])
-    with info_cols[0]:
-        st.write(f"**Recipient wallet:** `{recipient}`")
-        st.write(f"**Memo / reference:** `{reference}`")
-        st.write(f"**Amount:** {amount_usdc} USDC (SPL token)")
-        st.markdown("Scan the QR below **or** copy the Solana Pay link into your wallet.")
-    with info_cols[1]:
-        try:
-            qr = qrcode.QRCode(version=1, box_size=7, border=4)
-            qr.add_data(sol_pay_url)
-            qr.make(fit=True)
-            img_qr = qr.make_image(fill_color="#00ff88", back_color="#05060c")
-            buf_qr = BytesIO()
-            img_qr.save(buf_qr, format="PNG")
-            buf_qr.seek(0)
-            st.image(buf_qr, width=220, caption="Scan with Phantom / Solflare")
-        except Exception as err:
-            st.info(f"QR code unavailable ({err}). Copy the URL below instead.")
-
-    st.markdown("**Solana Pay URL:**")
-    st.code(sol_pay_url, language=None)
-    st.caption("Tip: In Phantom → Settings → Solana Pay → 'Paste from clipboard'.")
-
-    st.session_state.solana_signature = st.text_input(
-        "Transaction signature",
-        value=st.session_state.solana_signature,
-        placeholder="5YkK3d... (shown in your wallet after sending USDC)",
-    )
-
-    verify_col, refresh_col = st.columns([2, 1])
-    with verify_col:
-        if st.button("✅ I've paid – verify USDC", key="verify_solana", use_container_width=True):
-            ok, message = verify_payment(st.session_state.solana_signature, "solana")
-            if ok:
-                st.session_state.paid = True
-                save_subscription_record(
-                    email_value,
-                    st.session_state.user_wallet.strip(),
-                    st.session_state.solana_signature.strip(),
-                    amount_usdc,
-                )
-                st.session_state.solana_signature = ""
-                st.session_state.solana_pay_url = None
-                st.session_state.solana_reference = None
-                st.success("✅ Premium unlocked! Create your custom trading strategy below.")
-                st.balloons()
-            else:
-                st.warning(message)
-    with refresh_col:
-        if st.button("↻ New payment QR/link", key="refresh_solana_link", use_container_width=True):
-            st.session_state.solana_pay_url = None
-            st.session_state.solana_reference = None
-            st.rerun()
-
-    # ------------------- OPTION B: LEMON SQUEEZY -------------------
-    st.markdown("#### Option B — Lemon Squeezy checkout (card / PayPal / Apple Pay)")
+    st.markdown("#### Step 1 - Launch checkout")
     if LEMON_CHECKOUT_URL:
-        st.caption("Secure hosted checkout powered by Lemon Squeezy. After paying, paste your order number below.")
         checkout_link = LEMON_CHECKOUT_URL
         encoded_email = quote_plus(email_value) if email_value else ""
         if encoded_email:
             sep = "&" if "?" in checkout_link else "?"
             checkout_link = f"{checkout_link}{sep}checkout[email]={encoded_email}"
         st.markdown(
-            f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>🍋 Launch Lemon Squeezy Checkout</a>",
+            f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>Launch Lemon Squeezy Checkout</a>",
             unsafe_allow_html=True,
         )
-        st.caption("💡 **Tip:** After checkout, copy the **order number** from your receipt email (usually 6-8 digits like `123456`).")
-
-        st.session_state.lemon_order_id = st.text_input(
-            "Lemon Squeezy order number",
-            value=st.session_state.lemon_order_id,
-            placeholder="e.g. 123456 (from receipt email)",
-        )
-
-        # Check if payment was verified via webhook first
-        webhook_check, webhook_data = check_webhook_payment(email_value)
-        if webhook_check:
-            st.success("✅ Payment verified via webhook! Premium unlocked.")
-            st.session_state.paid = True
-            st.balloons()
-            st.rerun()
-        
-        if st.button("✅ Verify Lemon order", key="verify_lemon", use_container_width=True):
-            ok, payload = verify_lemon_order(st.session_state.lemon_order_id, email_value)
-            if ok:
-                total_cents = payload.get("total") or 0
-                total_amount = float(total_cents) / 100.0 if total_cents else amount_usdc
-                reference = f"lemon-{payload.get('order_id')}"
-                save_subscription_record(
-                    email_value,
-                    "",
-                    reference,
-                    total_amount,
-                )
-                st.session_state.paid = True
-                st.session_state.lemon_order_id = ""
-                st.success("✅ Premium unlocked via Lemon Squeezy! Welcome to unlimited mode.")
-                st.balloons()
-            else:
-                error_msg = str(payload)
-                st.warning(error_msg)
-                # If API fails, offer manual verification option
-                if "404" in error_msg or "API error" in error_msg:
-                    st.info("💡 **API verification failed.** If you completed payment, the webhook will verify automatically, or email `hello@snipevision.xyz` with your order number for manual verification.")
     else:
-        st.info("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
+        st.error("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
+
+    st.markdown("#### Step 2 - Auto-verify")
+    st.info("As soon as Lemon confirms payment, we unlock your email automatically. If nothing happens after ~30 seconds, use the buttons below or paste your order number.")
+
+    webhook_check, webhook_data = check_webhook_payment(email_value)
+    if webhook_check and not st.session_state.paid:
+        st.success("Payment verified via webhook! Premium unlocked.")
+        st.session_state.paid = True
+        st.balloons()
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("---")
+        return
+
+    cols = st.columns([2, 1])
+    with cols[0]:
+        if st.button("Check my email for a payment", key="poll_lemon"):
+            webhook_check, webhook_data = check_webhook_payment(email_value)
+            if webhook_check:
+                st.success("Payment found! Enjoy unlimited snipes.")
+                st.session_state.paid = True
+                st.balloons()
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("---")
+                return
+            st.warning("No payment found yet. If you just paid, paste your order number below or try again shortly.")
+
+    st.session_state.lemon_order_id = st.text_input(
+        "Lemon Squeezy order number (from your receipt email)",
+        value=st.session_state.lemon_order_id,
+        placeholder="e.g. 123456",
+    )
+
+    if st.button("Verify manually", key="verify_lemon", use_container_width=True):
+        ok, payload = verify_lemon_order(st.session_state.lemon_order_id, email_value)
+        if ok:
+            total_cents = payload.get("total") or 0
+            total_amount = float(total_cents) / 100.0 if total_cents else SUBSCRIPTION_PRICE
+            reference = f"lemon-{payload.get('order_id')}"
+            save_subscription_record(
+                email_value,
+                "",
+                reference,
+                total_amount,
+            )
+            st.session_state.paid = True
+            st.session_state.lemon_order_id = ""
+            st.success("Premium unlocked via Lemon Squeezy! Create your custom trading strategy below.")
+            st.balloons()
+        else:
+            error_msg = str(payload)
+            st.warning(error_msg)
+            st.info("If the API still cannot find it, email hello@snipevision.xyz with your order number and we will unlock you manually.")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
 
 # Paywall glow
 if not st.session_state.paid:
-    st.markdown("<p class='paywall'>3 FREE LOCKS • UNLIMITED SNIPES FOR $5/MO</p>", unsafe_allow_html=True)
+    st.markdown(f"<p class='paywall'>3 FREE LOCKS • UNLIMITED SNIPES FOR {SUBSCRIPTION_PRICE_LABEL}/MO</p>", unsafe_allow_html=True)
     st.markdown("""
     <div class='neon-paywall-hint'>
         <strong>Sync your arsenal</strong>
@@ -1914,8 +1653,6 @@ if not st.session_state.paid:
     </div>
     """, unsafe_allow_html=True)
     st.session_state.user_email = st.text_input("Command console email", value=st.session_state.user_email, placeholder="you@alpha.xyz")
-    st.session_state.user_wallet = st.text_input("Primary Solana wallet (optional, unlock sync)", value=st.session_state.user_wallet, placeholder="e.g. 9xQeWv...Phantom")
-
     # Allow free scans only after email is provided
     email_identifier = st.session_state.user_email.strip()
     if email_identifier:
@@ -1926,31 +1663,37 @@ if not st.session_state.paid:
     else:
         st.info("Enter your email above to use free scans or restore a subscription.")
 
-    st.markdown("#### Already subscribed? Enter your email or wallet to restore access.")
-    st.session_state.subscription_lookup = st.text_input("Email or Solana wallet", value=st.session_state.subscription_lookup, key="lookup_input")
-    col_lookup = st.columns([1, 1])
-    with col_lookup[0]:
-        if st.button("🔁 Check Subscription Status"):
-            identifier = st.session_state.subscription_lookup.strip()
-            success, message = check_subscription_status(identifier)
-            if success:
-                st.session_state.paid = True
-                st.success(message)
-                st.balloons()
-            else:
-                st.warning(message)
-    st.markdown("---")
+st.markdown("#### Already subscribed? Enter your email to restore access.")
+st.session_state.subscription_lookup = st.text_input("Subscription email", value=st.session_state.subscription_lookup, key="lookup_input")
+col_lookup = st.columns([1, 1])
+with col_lookup[0]:
+    if st.button("🔁 Check Subscription Status"):
+        identifier = st.session_state.subscription_lookup.strip()
+        success, message = check_subscription_status(identifier)
+        if success:
+            st.session_state.paid = True
+            st.success(message)
+            st.balloons()
+        else:
+            st.warning(message)
+st.markdown("---")
 
 # Show custom rules section if clicked
 if st.session_state.show_custom_rules:
     st.markdown("---")
     st.markdown("### ⚙️ Custom Rules (Premium Feature)")
     if not st.session_state.paid:
-        st.warning("🔒 This feature requires a $5/mo subscription. Upgrade below to unlock!")
+        st.warning(f"🔒 This feature requires a {SUBSCRIPTION_PRICE_LABEL}/mo subscription. Upgrade below to unlock!")
         show_payment_options()
     else:
         st.success("✅ Premium unlocked! Create your custom trading strategy below.")
         st.info("📊 **5-rule limit per scan** - Maximum 5 conditions allowed. All conditions must match (AND logic).")
+        custom_universe = st.radio(
+            "Select which universe to scan",
+            ["All", "Crypto", "Stocks"],
+            horizontal=True,
+            key="custom_rules_universe",
+        )
         st.markdown("**Supported Indicators (50+):**")
         with st.expander("📋 View All Supported Indicators"):
             col1, col2, col3 = st.columns(3)
@@ -2002,7 +1745,7 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
         if st.button("🔍 Scan with Custom Rules", use_container_width=True):
             if custom_rule.strip():
                 with st.spinner("🔍 Scanning market with your custom rules..."):
-                    results, error, debug_info = scan_with_custom_rules(custom_rule)
+                    results, error, debug_info = scan_with_custom_rules(custom_rule, custom_universe)
                     debug_info = debug_info or {}
                 
                 if error:
@@ -2095,12 +1838,18 @@ if st.session_state.show_scanner:
     st.markdown("---")
     st.markdown("### 🚀 Quick Snipe Scanner")
     st.info("Click the button below to scan for the top 10 best setups right now!")
+    scan_universe = st.radio(
+        "Pick your universe",
+        ["All", "Crypto", "Stocks"],
+        horizontal=True,
+        key="quick_universe",
+    )
 
 
 @st.cache_data(ttl=900)
-def scan():
+def scan(universe_key: str):
     results = []
-    symbols = ["BTC-USD","ETH-USD","SOL-USD","XRP-USD","DOGE-USD","ADA-USD","AVAX-USD","NVDA","TSLA","AAPL","SMCI"]
+    symbols = QUICK_SNIPE_UNIVERSES.get(universe_key, QUICK_SNIPE_UNIVERSES["All"])
     
     for sym in symbols:
         try:
@@ -2227,12 +1976,12 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown("""
+            st.markdown(f"""
             <div class='paywall-overlay'>
                 <div class='pill'>snipe pass</div>
                 <h2>Reload the chamber</h2>
-                <div class='price-tag'>$5<span>per month</span></div>
-                <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Solana wallet unlock.</p>
+                <div class='price-tag'>{SUBSCRIPTION_PRICE_LABEL}<span>per month</span></div>
+                <p class='premium-note'>Unlimited quick snipes, custom playbooks, neon chart exports & instant Lemon Squeezy unlock.</p>
             </div>
             """, unsafe_allow_html=True)
         show_payment_options()
@@ -2241,10 +1990,10 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
             increment_free_scan_count(email_identifier)
         st.session_state.scans += 1
         
-        with st.spinner("🔍 Scanning the entire market..."):
-            top = scan()
+        with st.spinner(f"🔍 Scanning the {scan_universe.lower()} universe..."):
+            top = scan(scan_universe)
         
-        st.success(f"✅ Found {len(top)} hot setups!")
+        st.success(f"✅ Found {len(top)} hot setups in the {scan_universe.lower()} universe!")
         
         for r in top:
             c1, c2 = st.columns([3, 1])
