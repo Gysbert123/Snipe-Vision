@@ -16,6 +16,7 @@ from urllib.parse import urlencode, quote_plus
 from ta_indicators import calculate_all_indicators
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 from streamlit.web.server.server import Server
+import streamlit.components.v1 as components
 try:
     from supabase import create_client
 except ImportError:
@@ -103,6 +104,56 @@ CUSTOM_RULE_UNIVERSES = {
     "Crypto": CUSTOM_CRYPTO_SYMBOLS,
     "Stocks": CUSTOM_STOCK_SYMBOLS,
 }
+
+def map_to_tradingview_symbol(sym: str) -> str:
+    """Map Yahoo-style symbols to TradingView symbols in a best-effort way."""
+    base = (sym or "").upper().strip()
+    # If it's already a clean symbol (e.g., "BTC"), assume crypto and add USD
+    if len(base) <= 5 and not base.endswith("USD") and not "-" in base:
+        # Likely a crypto symbol, add USD suffix for TradingView
+        return f"{base}USD"
+    # If it has -USD, remove the dash
+    if base.endswith("-USD"):
+        return base.replace("-", "")
+    # For stocks, try adding exchange prefix if needed (TradingView usually handles plain symbols)
+    # For now, return as-is and let TradingView handle it
+    return base
+
+def render_tradingview_widget(tv_symbol: str, height: int = 620):
+    """Embed a TradingView-style interactive chart with drawing tools."""
+    if not tv_symbol:
+        return
+    container_id = f"tv_{tv_symbol.replace(':', '_').replace('-', '_').replace('.', '_')}"
+    widget_html = f"""
+    <div class="tradingview-widget-container" style="margin: 1rem 0; border-radius: 12px; overflow: hidden;">
+      <div id="{container_id}" style="height:{height}px;"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget({{
+        "container_id": "{container_id}",
+        "symbol": "{tv_symbol}",
+        "interval": "D",
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#05060c",
+        "enable_publishing": false,
+        "hide_top_toolbar": false,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "details": true,
+        "hotlist": false,
+        "calendar": false,
+        "studies": [],
+        "drawing_toolbar": true,
+        "disabled_features": ["use_localstorage_for_settings"],
+        "enabled_features": ["study_templates"]
+      }});
+      </script>
+    </div>
+    """
+    components.html(widget_html, height=height + 40)
 
 if 'free_scans' not in st.session_state:
     st.session_state.free_scans = 0
@@ -1123,6 +1174,170 @@ def build_ai_summary(symbol, timeframe, score, price, change_pct, bias, signals,
         f"{action}.{context}"
     ).strip()
 
+def create_enhanced_chart(df, sym_clean, score, indicators=None, rules=None):
+    """Create a high-quality Plotly chart with premium styling."""
+    fig = go.Figure()
+    
+    # Enhanced candlesticks with thicker lines and better colors
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df.Open,
+            high=df.High,
+            low=df.Low,
+            close=df.Close,
+            name="Price",
+            increasing_line_color="#00ff88",
+            decreasing_line_color="#ff4d4d",
+            increasing_fillcolor="#00ff88",
+            decreasing_fillcolor="#ff4d4d",
+            line=dict(width=2),
+            whiskerwidth=0.8,
+        )
+    )
+    
+    # Add EMAs with thicker, smoother lines
+    if indicators:
+        if indicators.get('EMA_50') is not None:
+            ema50 = indicators['EMA_50']
+            fig.add_trace(go.Scatter(
+                x=df.index,
+                y=ema50,
+                name="EMA50",
+                line=dict(color="#ffb347", width=2.5, smoothing=1.3),
+                opacity=0.9,
+            ))
+        if indicators.get('EMA_200') is not None:
+            ema200 = indicators['EMA_200']
+            fig.add_trace(go.Scatter(
+                x=df.index,
+                y=ema200,
+                name="EMA200",
+                line=dict(color="#9b59b6", width=2.5, smoothing=1.3),
+                opacity=0.9,
+            ))
+        
+        # Add Bollinger Bands if used
+        if rules and any(r[0] == "BB_TOUCH" for r in rules):
+            if indicators.get('BB_Upper') is not None:
+                fig.add_trace(go.Scatter(
+                    x=df.index,
+                    y=indicators['BB_Upper'],
+                    name="BB Upper",
+                    line=dict(color="#2980b9", dash="dash", width=1.5),
+                    opacity=0.7,
+                ))
+            if indicators.get('BB_Lower') is not None:
+                fig.add_trace(go.Scatter(
+                    x=df.index,
+                    y=indicators['BB_Lower'],
+                    name="BB Lower",
+                    line=dict(color="#2980b9", dash="dash", width=1.5),
+                    opacity=0.7,
+                ))
+        
+        # Add VWAP if used
+        if rules and any(r[0] in ["PRICE_ABOVE_VWAP", "PRICE_BELOW_VWAP"] for r in rules):
+            if indicators.get('VWAP') is not None:
+                fig.add_trace(go.Scatter(
+                    x=df.index,
+                    y=indicators['VWAP'],
+                    name="VWAP",
+                    line=dict(color="#f1c40f", width=2, dash="dot"),
+                    opacity=0.8,
+                ))
+    else:
+        # Fallback for Quick Snipe (no indicators dict)
+        if "EMA50" in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df.EMA50,
+                name="EMA50",
+                line=dict(color="#ffb347", width=2.5, smoothing=1.3),
+                opacity=0.9,
+            ))
+        if "EMA200" in df.columns:
+            fig.add_trace(go.Scatter(
+                x=df.index,
+                y=df.EMA200,
+                name="EMA200",
+                line=dict(color="#9b59b6", width=2.5, smoothing=1.3),
+                opacity=0.9,
+            ))
+    
+    # Enhanced volume bars
+    if "Volume" in df.columns and not df["Volume"].isna().all():
+        fig.add_trace(
+            go.Bar(
+                x=df.index,
+                y=df["Volume"],
+                name="Volume",
+                marker=dict(
+                    color="rgba(0,255,136,0.35)",
+                    line=dict(color="rgba(0,255,136,0.5)", width=0.5),
+                ),
+                yaxis="y2",
+                opacity=0.6,
+            )
+        )
+    
+    # Premium layout with enhanced styling
+    fig.update_layout(
+        height=580,
+        title=dict(
+            text=f"{sym_clean} – Score {score}/100",
+            font=dict(size=20, color="#e6f8ff", family="Arial Black, sans-serif"),
+            x=0.5,
+        ),
+        template="plotly_dark",
+        paper_bgcolor="#0a0e1a",
+        plot_bgcolor="#0a0e1a",
+        xaxis=dict(
+            gridcolor="rgba(255,255,255,0.1)",
+            gridwidth=1,
+            showgrid=True,
+            zeroline=False,
+            tickfont=dict(color="#a0a0a0", size=11),
+        ),
+        yaxis=dict(
+            title=dict(text="Price", font=dict(color="#00ff88", size=13)),
+            gridcolor="rgba(255,255,255,0.1)",
+            gridwidth=1,
+            showgrid=True,
+            zeroline=False,
+            tickfont=dict(color="#a0a0a0", size=11),
+        ),
+        yaxis2=dict(
+            title=dict(text="Volume", font=dict(color="#00ff88", size=13)),
+            overlaying="y",
+            side="right",
+            showgrid=False,
+            rangemode="tozero",
+            tickfont=dict(color="#00ff88", size=10),
+        ),
+        xaxis_rangeslider_visible=False,
+        hovermode="x unified",
+        margin=dict(l=50, r=50, t=70, b=50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(10,14,26,0.8)",
+            bordercolor="rgba(0,255,136,0.3)",
+            borderwidth=1,
+            font=dict(color="#e6f8ff", size=11),
+        ),
+        hoverlabel=dict(
+            bgcolor="rgba(0,0,0,0.9)",
+            bordercolor="#00ff88",
+            font=dict(color="#e6f8ff", size=12),
+        ),
+    )
+    
+    return fig
+
 def scan_with_custom_rules(custom_rules_text, universe_key="All"):
     """Scan market with custom rules - supports 50+ indicators, 5-rule limit"""
     results = []
@@ -1459,72 +1674,9 @@ def scan_with_custom_rules(custom_rules_text, universe_key="All"):
                 change_pct = float(((latest.Close - prev.Close) / prev.Close) * 100) if prev.Close != 0 else 0.0
                 price_val = float(latest.Close)
 
-                # Create enhanced chart with overlays + volume
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Candlestick(
-                        x=df.index,
-                        open=df.Open,
-                        high=df.High,
-                        low=df.Low,
-                        close=df.Close,
-                        name="Price",
-                        increasing_line_color="#00ff88",
-                        decreasing_line_color="#ff4d4d",
-                    )
-                )
-                
-                # Add EMAs
-                if indicators.get('EMA_50') is not None:
-                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_50'], name="EMA50", line=dict(color="#ffb347", width=1)))
-                if indicators.get('EMA_200') is not None:
-                    fig.add_trace(go.Scatter(x=df.index, y=indicators['EMA_200'], name="EMA200", line=dict(color="#9b59b6", width=1)))
-                
-                # Add Bollinger Bands if used
-                if any(r[0] == "BB_TOUCH" for r in rules):
-                    if indicators.get('BB_Upper') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Upper'], name="BB Upper", line=dict(color="#2980b9", dash="dash", width=1)))
-                    if indicators.get('BB_Lower') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['BB_Lower'], name="BB Lower", line=dict(color="#2980b9", dash="dash", width=1)))
-                
-                # Add VWAP if used
-                if any(r[0] in ["PRICE_ABOVE_VWAP", "PRICE_BELOW_VWAP"] for r in rules):
-                    if indicators.get('VWAP') is not None:
-                        fig.add_trace(go.Scatter(x=df.index, y=indicators['VWAP'], name="VWAP", line=dict(color="#f1c40f", width=1)))
-
-                # Volume overlay on secondary axis
-                if "Volume" in df.columns and not df["Volume"].isna().all():
-                    fig.add_trace(
-                        go.Bar(
-                            x=df.index,
-                            y=df["Volume"],
-                            name="Volume",
-                            marker=dict(color="rgba(0,255,136,0.25)"),
-                            yaxis="y2",
-                            opacity=0.35,
-                        )
-                    )
-                
-                fig.update_layout(
-                    height=520,
-                    title=f"{sym_clean} – Custom Rules Match (Score: {score}/100)",
-                    template="plotly_dark",
-                    paper_bgcolor="#0e1117",
-                    plot_bgcolor="#0e1117",
-                    xaxis_rangeslider_visible=False,
-                    hovermode="x unified",
-                    margin=dict(l=40, r=20, t=60, b=40),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    yaxis=dict(title=dict(text="Price")),
-                    yaxis2=dict(
-                        title=dict(text="Volume", font=dict(color="#00ff88")),
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        rangemode="tozero",
-                        tickfont=dict(color="#00ff88"),
-                    ),
-                )
+                # Create enhanced chart with premium styling
+                fig = create_enhanced_chart(df, sym_clean, score, indicators, rules)
+                fig.update_layout(title=dict(text=f"{sym_clean} – Custom Rules Match (Score: {score}/100)"))
                 
                 figure_dict = fig.to_dict()
                 explanation = " | ".join(explanation_parts) if explanation_parts else "Matches all your custom rules"
@@ -1754,6 +1906,10 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                     st.success(f"✅ Found {len(results)} assets matching your custom rules!")
                     
                     for r in results:
+                        sym_key = f"tv_toggle_{r['sym']}"
+                        if sym_key not in st.session_state:
+                            st.session_state[sym_key] = False
+                        
                         c1, c2 = st.columns([3, 1])
                         
                         with c1:
@@ -1762,6 +1918,19 @@ Golden Cross AND RSI > 50 AND Price above 200 EMA""", language=None)
                                 fig_obj = go.Figure(fig_obj)
                             if fig_obj is not None:
                                 st.plotly_chart(fig_obj, use_container_width=True)
+                            
+                            # TradingView toggle button
+                            tv_col1, tv_col2 = st.columns([1, 4])
+                            with tv_col1:
+                                if st.button("📊 TradingView", key=f"tv_btn_{r['sym']}", use_container_width=True):
+                                    st.session_state[sym_key] = not st.session_state[sym_key]
+                                    st.rerun()
+                            
+                            if st.session_state[sym_key]:
+                                # Map cleaned symbol (e.g., "BTC") to TradingView format ("BTCUSD")
+                                tv_symbol = map_to_tradingview_symbol(r['sym'])
+                                st.markdown("**📊 Interactive TradingView Chart (with drawing tools):**")
+                                render_tradingview_widget(tv_symbol, height=620)
                         
                         with c2:
                             delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
@@ -1881,54 +2050,8 @@ def scan(universe_key: str):
                 change_pct = float(((latest.Close - prev.Close) / prev.Close) * 100) if prev.Close != 0 else 0.0
                 price_val = float(latest.Close)
                 
-                fig = go.Figure()
-                fig.add_trace(
-                    go.Candlestick(
-                        x=df.index,
-                        open=df.Open,
-                        high=df.High,
-                        low=df.Low,
-                        close=df.Close,
-                        name="Price",
-                        increasing_line_color="#00ff88",
-                        decreasing_line_color="#ff4d4d",
-                    )
-                )
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA50, name="EMA50", line=dict(color="#ffb347")))
-                fig.add_trace(go.Scatter(x=df.index, y=df.EMA200, name="EMA200", line=dict(color="#9b59b6")))
-                
-                if "Volume" in df.columns and not df["Volume"].isna().all():
-                    fig.add_trace(
-                        go.Bar(
-                            x=df.index,
-                            y=df["Volume"],
-                            name="Volume",
-                            marker=dict(color="rgba(0,255,136,0.25)"),
-                            yaxis="y2",
-                            opacity=0.35,
-                        )
-                    )
-                
-                fig.update_layout(
-                    height=520,
-                    title=f"{sym_clean} – Score {score}/100",
-                    template="plotly_dark",
-                    paper_bgcolor="#0e1117",
-                    plot_bgcolor="#0e1117",
-                    xaxis_rangeslider_visible=False,
-                    hovermode="x unified",
-                    margin=dict(l=40, r=20, t=60, b=40),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    yaxis=dict(title=dict(text="Price")),
-                    yaxis2=dict(
-                        title=dict(text="Volume", font=dict(color="#00ff88")),
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        rangemode="tozero",
-                        tickfont=dict(color="#00ff88"),
-                    ),
-                )
+                # Create enhanced chart with premium styling
+                fig = create_enhanced_chart(df, sym_clean, score, indicators=None, rules=None)
                 
                 bias = classify_bias(signals)
                 action = action_from_bias(bias, score)
@@ -1996,6 +2119,10 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
         st.success(f"✅ Found {len(top)} hot setups in the {scan_universe.lower()} universe!")
         
         for r in top:
+            sym_key = f"tv_toggle_{r['sym']}"
+            if sym_key not in st.session_state:
+                st.session_state[sym_key] = False
+            
             c1, c2 = st.columns([3, 1])
             
             with c1: 
@@ -2004,6 +2131,19 @@ if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
                     fig_obj = go.Figure(fig_obj)
                 if fig_obj is not None:
                     st.plotly_chart(fig_obj, use_container_width=True)
+                
+                # TradingView toggle button
+                tv_col1, tv_col2 = st.columns([1, 4])
+                with tv_col1:
+                    if st.button("📊 TradingView", key=f"tv_btn_{r['sym']}", use_container_width=True):
+                        st.session_state[sym_key] = not st.session_state[sym_key]
+                        st.rerun()
+                
+                if st.session_state[sym_key]:
+                    # Map cleaned symbol (e.g., "BTC") to TradingView format ("BTCUSD")
+                    tv_symbol = map_to_tradingview_symbol(r['sym'])
+                    st.markdown("**📊 Interactive TradingView Chart (with drawing tools):**")
+                    render_tradingview_widget(tv_symbol, height=620)
             
             with c2:
                 delta_text = f"{r.get('change_pct', 0.0):+.2f}% 24h"
