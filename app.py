@@ -258,21 +258,36 @@ def render_static_page(markdown_content):
 
 def render_terms_page():
     content = """
-# Terms of Service – SnipeVision
+# SnipeVision – Terms of Service
 
-Last updated: 24 November 2025
-
-SnipeVision LLC (“SnipeVision”, “we”, “us”) provides the SnipeVision scanner platform. By using the service you agree to the terms below.
+Last updated: 27 November 2025
 
 <div class='static-card'>
-1. **Acceptance.** By accessing SnipeVision you agree to these Terms and our Privacy Policy.<br>
-2. **Service.** We provide chart analysis, alerts, and educational content on an “as-is” basis. SnipeVision is not financial advice.<br>
-3. **Accounts.** Keep your login, wallet, or subscription details secure. You are responsible for activity under your access.<br>
-4. **Payments.** Monthly fees are billed in advance. Failed payments may pause access. Refund policy applies as published.<br>
-5. **Restrictions.** Do not misuse, reverse engineer, or resell the service. We may suspend accounts that break the rules.<br>
-6. **Limitation of Liability.** We are not liable for trading losses, missed opportunities, or indirect damages.<br>
-7. **Changes.** We may update these Terms. Continued use after updates means you accept the new Terms.<br>
-8. **Contact.** hello@snipevision.xyz
+<ol>
+<li><strong>Acceptance of Terms.</strong> By accessing or using SnipeVision (<a href="https://snipevision.xyz">https://snipevision.xyz</a>), you agree to these Terms of Service.</li>
+<li><strong>Description of Service.</strong> SnipeVision is a web-based technical-analysis tool that scans publicly available price data for cryptocurrencies and stocks and displays charts with indicators. The service is provided strictly for <em>educational and informational purposes only</em>.</li>
+<li><strong>No Financial Advice.</strong> SnipeVision is <strong>not</strong> a financial advisor, broker, or investment service. All content, charts, signals, and AI explanations are for educational use only. You are solely responsible for your own trading and investment decisions. Past performance is not indicative of future results.</li>
+<li><strong>Subscription & Payment.</strong>
+    <ul>
+        <li>Paid plans are $5 USD per month (recurring).</li>
+        <li>Payments are processed securely by Lemon Squeezy.</li>
+        <li>You may cancel anytime via your Lemon Squeezy customer portal — no further charges will occur.</li>
+        <li>No refunds for partial months.</li>
+    </ul>
+</li>
+<li><strong>Free Tier Limitations.</strong> Free users are limited to 3 chart scans per browser session. After that, a paid subscription is required.</li>
+<li><strong>Acceptable Use.</strong> You may not:
+    <ul>
+        <li>Use bots or scripts to overload the service</li>
+        <li>Attempt to reverse-engineer or copy the platform</li>
+        <li>Use the service for illegal activities</li>
+    </ul>
+</li>
+<li><strong>Limitation of Liability.</strong> To the fullest extent permitted by law, SnipeVision and its operators shall not be liable for any direct, indirect, incidental, or consequential damages arising from your use of the service.</li>
+<li><strong>Changes to Terms.</strong> We may update these terms. Continued use after changes constitutes acceptance.</li>
+<li><strong>Governing Law.</strong> South African law applies.</li>
+</ol>
+<p><strong>Contact:</strong> <a href="mailto:hello@snipevision.xyz">hello@snipevision.xyz</a></p>
 </div>
 """
     render_static_page(content)
@@ -281,18 +296,32 @@ SnipeVision LLC (“SnipeVision”, “we”, “us”) provides the SnipeVision
 
 def render_privacy_page():
     content = """
-# Privacy Policy – SnipeVision
+# SnipeVision – Privacy Policy
 
-Last updated: 24 November 2025
+Last updated: 27 November 2025
 
 <div class='static-card'>
-- **Information we collect.** Email, subscription status, wallet references, and usage logs needed to deliver the service.<br>
-- **How we use it.** To manage subscriptions, send product updates, improve the app, and comply with legal duties.<br>
-- **Sharing.** We only share data with infrastructure providers (hosting, analytics, payment processors) under strict contracts.<br>
-- **Security.** We use encryption, access controls, and monitoring to protect your data.<br>
-- **Your rights.** Request access, correction, or deletion anytime by emailing hello@snipevision.xyz.<br>
-- **Retention.** Subscription data is kept while your account is active and for legal recordkeeping after cancellation.<br>
-- **International transfers.** Data may be processed in the US and EU. We rely on standard contractual clauses where required.
+<ol>
+<li><strong>Information We Collect.</strong>
+    <ul>
+        <li>Email address (only when you purchase a subscription via Lemon Squeezy)</li>
+        <li>Usage data (number of scans performed) via browser session storage</li>
+        <li>No personal payment details are stored by us — all payments are handled by Lemon Squeezy.</li>
+    </ul>
+</li>
+<li><strong>How We Use Your Information.</strong>
+    <ul>
+        <li>To provide and improve the service</li>
+        <li>To process your subscription and send subscription receipts (via Lemon Squeezy)</li>
+        <li>To enforce our 3-scan free limit</li>
+    </ul>
+</li>
+<li><strong>Third-Party Services.</strong> Payments are processed by Lemon Squeezy (<a href="https://lemonsqueezy.com/privacy" target="_blank">https://lemonsqueezy.com/privacy</a>). Their privacy policy applies to payment data.</li>
+<li><strong>Data Storage & Security.</strong> Your email and subscription status is stored securely. We do not sell or share your personal data with third parties except as required to deliver the service.</li>
+<li><strong>Children.</strong> The service is not directed to persons under 18.</li>
+<li><strong>Changes.</strong> We may update this policy. Continued use constitutes acceptance.</li>
+</ol>
+<p><strong>Contact:</strong> <a href="mailto:hello@snipevision.xyz">hello@snipevision.xyz</a></p>
 </div>
 """
     render_static_page(content)
