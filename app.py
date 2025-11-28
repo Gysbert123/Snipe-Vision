@@ -204,28 +204,128 @@ STATIC_PAGE_CSS = """
 """
 
 logo_svg = """
-<svg width="320" height="320" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="pulseFill" cx="50%" cy="50%" r="70%">
-      <stop offset="0%" stop-color="#1dffb0" stop-opacity="0.95"/>
-      <stop offset="45%" stop-color="#06cfff" stop-opacity="0.65"/>
-      <stop offset="100%" stop-color="#090015" stop-opacity="0"/>
+    <!-- Dark background gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="80%">
+      <stop offset="0%" stop-color="#0a0e1a" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#04040d" stop-opacity="1"/>
     </radialGradient>
-    <linearGradient id="arcStroke" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#00ff88"/>
-      <stop offset="50%" stop-color="#19d9ff"/>
-      <stop offset="100%" stop-color="#b44bff"/>
+    
+    <!-- Neon cyan glow -->
+    <radialGradient id="neonGlow" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#19d9ff" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#00ff88" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#19d9ff" stop-opacity="0"/>
+    </radialGradient>
+    
+    <!-- Golden Fibonacci spiral gradient -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd700" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#ffb347" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ff8c00" stop-opacity="0.7"/>
     </linearGradient>
+    
+    <!-- Glow filter for neon effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Stronger glow for crosshair -->
+    <filter id="strongGlow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-  <circle cx="160" cy="160" r="140" fill="url(#pulseFill)" stroke="url(#arcStroke)" stroke-width="4"/>
-  <path d="M60 200 C90 120, 140 110, 160 150" stroke="#19d9ff" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <path d="M260 200 C230 120, 180 110, 160 150" stroke="#ff4081" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <path d="M90 190 L130 170 L150 210 L210 150 L250 160" stroke="url(#arcStroke)" stroke-width="6" fill="none" stroke-linecap="round"/>
-  <path d="M125 120 L200 120" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
-  <path d="M200 120 L190 105" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
-  <path d="M200 120 L190 135" stroke="#00ff88" stroke-width="5" stroke-linecap="round"/>
-  <circle cx="160" cy="160" r="30" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2" fill="none"/>
-  <circle cx="160" cy="160" r="4" fill="#ffffff"/>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+  
+  <!-- Ambient glow -->
+  <circle cx="512" cy="512" r="400" fill="url(#neonGlow)" opacity="0.3"/>
+  
+  <!-- Golden Fibonacci Spiral (0.618 ratio) -->
+  <!-- Approximated with arcs following golden ratio progression -->
+  <path d="M 512 512 
+           M 512 300 
+           A 212 212 0 0 1 724 512 
+           A 131 131 0 0 1 593 643 
+           A 81 81 0 0 1 512 562 
+           A 50 50 0 0 1 562 512 
+           A 31 31 0 0 1 531 543 
+           A 19 19 0 0 1 512 524 
+           A 12 12 0 0 1 524 512 
+           A 7 7 0 0 1 519 519" 
+        fill="none" 
+        stroke="url(#goldGrad)" 
+        stroke-width="3" 
+        stroke-linecap="round" 
+        opacity="0.85"
+        filter="url(#glow)"/>
+  
+  <!-- Tactical Crosshair - Outer circle -->
+  <circle cx="512" cy="512" r="180" fill="none" stroke="#19d9ff" stroke-width="1.5" opacity="0.6" filter="url(#glow)"/>
+  
+  <!-- Crosshair - Main lines (thin, tactical) -->
+  <line x1="512" y1="200" x2="512" y2="824" stroke="#00ff88" stroke-width="2" stroke-linecap="round" filter="url(#strongGlow)"/>
+  <line x1="200" y1="512" x2="824" y2="512" stroke="#00ff88" stroke-width="2" stroke-linecap="round" filter="url(#strongGlow)"/>
+  
+  <!-- Crosshair - Diagonal lines (subtle) -->
+  <line x1="332" y1="332" x2="692" y2="692" stroke="#19d9ff" stroke-width="1" stroke-linecap="round" opacity="0.5" filter="url(#glow)"/>
+  <line x1="692" y1="332" x2="332" y2="692" stroke="#19d9ff" stroke-width="1" stroke-linecap="round" opacity="0.5" filter="url(#glow)"/>
+  
+  <!-- Crosshair - Tick marks (tactical style) -->
+  <line x1="512" y1="200" x2="512" y2="240" stroke="#19d9ff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+  <line x1="512" y1="784" x2="512" y2="824" stroke="#19d9ff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+  <line x1="200" y1="512" x2="240" y2="512" stroke="#19d9ff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+  <line x1="784" y1="512" x2="824" y2="512" stroke="#19d9ff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+  
+  <!-- Inner crosshair circle -->
+  <circle cx="512" cy="512" r="60" fill="none" stroke="#00ff88" stroke-width="1.5" opacity="0.7" filter="url(#glow)"/>
+  
+  <!-- Stylized Eye (drawn, thin lines, not realistic) -->
+  <!-- Eye outline -->
+  <ellipse cx="512" cy="512" rx="45" ry="28" fill="none" stroke="#19d9ff" stroke-width="2" stroke-linecap="round" filter="url(#glow)"/>
+  
+  <!-- Upper eyelid -->
+  <path d="M 467 500 Q 512 488 557 500" fill="none" stroke="#00ff88" stroke-width="2" stroke-linecap="round" filter="url(#glow)"/>
+  
+  <!-- Lower eyelid -->
+  <path d="M 467 524 Q 512 536 557 524" fill="none" stroke="#00ff88" stroke-width="1.5" stroke-linecap="round" opacity="0.7" filter="url(#glow)"/>
+  
+  <!-- Iris (simple circle) -->
+  <circle cx="512" cy="512" r="18" fill="none" stroke="#00ff88" stroke-width="2" filter="url(#glow)"/>
+  
+  <!-- Pupil (center dot) -->
+  <circle cx="512" cy="512" r="6" fill="#19d9ff" filter="url(#strongGlow)"/>
+  
+  <!-- Eye highlight (small glint) -->
+  <circle cx="505" cy="508" r="3" fill="#ffffff" opacity="0.9"/>
+  
+  <!-- Center dot (crosshair center) -->
+  <circle cx="512" cy="512" r="3" fill="#00ff88" filter="url(#strongGlow)"/>
+  
+  <!-- "SnipeVision" Text -->
+  <text x="512" y="880" 
+        font-family="'Rajdhani', 'Orbitron', 'Exo 2', 'Arial Black', sans-serif" 
+        font-size="72" 
+        font-weight="700" 
+        text-anchor="middle" 
+        fill="#19d9ff" 
+        letter-spacing="8"
+        filter="url(#strongGlow)">
+    SNIPEVISION
+  </text>
+  
+  <!-- Subtitle accent line -->
+  <line x1="412" y1="920" x2="612" y2="920" stroke="#00ff88" stroke-width="2" stroke-linecap="round" opacity="0.6" filter="url(#glow)"/>
 </svg>
 """
 NEON_LOGO = "data:image/svg+xml;base64," + base64.b64encode(logo_svg.encode("utf-8")).decode("utf-8")
@@ -546,7 +646,7 @@ with hero_left:
         <div class='hero-copy'>
             <p class='eyebrow'>AUTOMATED 24/7 ALPHA RADAR</p>
             <h1 class='hyper-title'>SNIPEVISION</h1>
-            <p class='subtitle'>Neon-grade liquidity optics that surface sniper-ready entries before the herd even yawns.</p>
+            <p class='subtitle'>Custom TA scanner that finds exactly what you tell it to — in seconds.</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -702,7 +802,7 @@ def verify_lemon_order(order_id, customer_email):
             # Also try to get the full error response for debugging
             if not error_text:
                 error_text = str(error_data)[:200]
-        except:
+    except:
             error_text = response.text[:200] if hasattr(response, 'text') else ""
         return False, f"Lemon Squeezy API error ({response.status_code}). {error_text}"
 
@@ -1766,7 +1866,7 @@ def show_payment_options():
             f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>Launch Lemon Squeezy Checkout</a>",
             unsafe_allow_html=True,
         )
-    else:
+            else:
         st.error("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
 
     st.markdown("#### Step 2 - Auto-verify")
@@ -1778,19 +1878,19 @@ def show_payment_options():
         st.session_state.paid = True
         st.balloons()
         st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("---")
+            st.markdown("---")
         return
-
+            
     cols = st.columns([2, 1])
-    with cols[0]:
+            with cols[0]:
         if st.button("Check my email for a payment", key="poll_lemon"):
             webhook_check, webhook_data = check_webhook_payment(email_value)
             if webhook_check:
                 st.success("Payment found! Enjoy unlimited snipes.")
-                st.session_state.paid = True
-                st.balloons()
+                    st.session_state.paid = True
+                    st.balloons()
                 st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("---")
+            st.markdown("---")
                 return
             st.warning("No payment found yet. If you just paid, paste your order number below or try again shortly.")
 
@@ -1806,7 +1906,7 @@ def show_payment_options():
             total_cents = payload.get("total") or 0
             total_amount = float(total_cents) / 100.0 if total_cents else SUBSCRIPTION_PRICE
             reference = f"lemon-{payload.get('order_id')}"
-            save_subscription_record(
+                    save_subscription_record(
                 email_value,
                 "",
                 reference,
@@ -1815,12 +1915,12 @@ def show_payment_options():
             st.session_state.paid = True
             st.session_state.lemon_order_id = ""
             st.success("Premium unlocked via Lemon Squeezy! Create your custom trading strategy below.")
-            st.balloons()
-        else:
+                    st.balloons()
+            else:
             error_msg = str(payload)
             st.warning(error_msg)
             st.info("If the API still cannot find it, email hello@snipevision.xyz with your order number and we will unlock you manually.")
-
+    
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("---")
 
@@ -1846,18 +1946,18 @@ if not st.session_state.paid:
 
 st.markdown("#### Already subscribed? Enter your email to restore access.")
 st.session_state.subscription_lookup = st.text_input("Subscription email", value=st.session_state.subscription_lookup, key="lookup_input")
-col_lookup = st.columns([1, 1])
-with col_lookup[0]:
-    if st.button("🔁 Check Subscription Status"):
-        identifier = st.session_state.subscription_lookup.strip()
-        success, message = check_subscription_status(identifier)
-        if success:
-            st.session_state.paid = True
-            st.success(message)
-            st.balloons()
-        else:
-            st.warning(message)
-st.markdown("---")
+    col_lookup = st.columns([1, 1])
+    with col_lookup[0]:
+        if st.button("🔁 Check Subscription Status"):
+            identifier = st.session_state.subscription_lookup.strip()
+            success, message = check_subscription_status(identifier)
+            if success:
+                st.session_state.paid = True
+                st.success(message)
+                st.balloons()
+            else:
+                st.warning(message)
+    st.markdown("---")
 
 # Show custom rules section if clicked
 if st.session_state.show_custom_rules:
@@ -2065,7 +2165,7 @@ def scan(universe_key: str):
                     "action": action,
                     "narrative": narrative,
                 })
-        except:
+        except: 
             pass
     
     return sorted(results, key=lambda x: x["score"], reverse=True)[:10]
@@ -2127,7 +2227,7 @@ if 'last_scan_results' in st.session_state and st.session_state.last_scan_result
                 render_copy_button(tweet, f"copy_{r['sym']}")
             else:
                 st.info("🔒 Tweet export locked. Upgrade to unlock!")
-    st.markdown("---")
+st.markdown("---")
 
 if st.button("🔥 RUN SNIPE SCAN", use_container_width=True):
     email_identifier = st.session_state.user_email.strip()
