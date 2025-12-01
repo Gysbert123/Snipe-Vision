@@ -802,7 +802,7 @@ def verify_lemon_order(order_id, customer_email):
             # Also try to get the full error response for debugging
             if not error_text:
                 error_text = str(error_data)[:200]
-    except:
+        except Exception:
             error_text = response.text[:200] if hasattr(response, 'text') else ""
         return False, f"Lemon Squeezy API error ({response.status_code}). {error_text}"
 
@@ -1866,7 +1866,7 @@ def show_payment_options():
             f"<a href='{checkout_link}' target='_blank' style='display:block;text-align:center;padding:1rem;background:linear-gradient(120deg,#FEC53A,#FF4FD8);color:#05060c;font-weight:700;border-radius:16px;margin:0.8rem 0;text-decoration:none;'>Launch Lemon Squeezy Checkout</a>",
             unsafe_allow_html=True,
         )
-            else:
+    else:
         st.error("Set LEMON_CHECKOUT_URL + LEMON_API_KEY environment variables to enable Lemon Squeezy checkout.")
 
     st.markdown("#### Step 2 - Auto-verify")
@@ -1878,19 +1878,19 @@ def show_payment_options():
         st.session_state.paid = True
         st.balloons()
         st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("---")
+        st.markdown("---")
         return
             
     cols = st.columns([2, 1])
-            with cols[0]:
+    with cols[0]:
         if st.button("Check my email for a payment", key="poll_lemon"):
             webhook_check, webhook_data = check_webhook_payment(email_value)
             if webhook_check:
                 st.success("Payment found! Enjoy unlimited snipes.")
-                    st.session_state.paid = True
-                    st.balloons()
+                st.session_state.paid = True
+                st.balloons()
                 st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("---")
+                st.markdown("---")
                 return
             st.warning("No payment found yet. If you just paid, paste your order number below or try again shortly.")
 
@@ -1906,7 +1906,7 @@ def show_payment_options():
             total_cents = payload.get("total") or 0
             total_amount = float(total_cents) / 100.0 if total_cents else SUBSCRIPTION_PRICE
             reference = f"lemon-{payload.get('order_id')}"
-                    save_subscription_record(
+            save_subscription_record(
                 email_value,
                 "",
                 reference,
@@ -1915,8 +1915,8 @@ def show_payment_options():
             st.session_state.paid = True
             st.session_state.lemon_order_id = ""
             st.success("Premium unlocked via Lemon Squeezy! Create your custom trading strategy below.")
-                    st.balloons()
-            else:
+            st.balloons()
+        else:
             error_msg = str(payload)
             st.warning(error_msg)
             st.info("If the API still cannot find it, email hello@snipevision.xyz with your order number and we will unlock you manually.")
@@ -1946,18 +1946,18 @@ if not st.session_state.paid:
 
 st.markdown("#### Already subscribed? Enter your email to restore access.")
 st.session_state.subscription_lookup = st.text_input("Subscription email", value=st.session_state.subscription_lookup, key="lookup_input")
-    col_lookup = st.columns([1, 1])
-    with col_lookup[0]:
-        if st.button("🔁 Check Subscription Status"):
-            identifier = st.session_state.subscription_lookup.strip()
-            success, message = check_subscription_status(identifier)
-            if success:
-                st.session_state.paid = True
-                st.success(message)
-                st.balloons()
-            else:
-                st.warning(message)
-    st.markdown("---")
+col_lookup = st.columns([1, 1])
+with col_lookup[0]:
+    if st.button("🔁 Check Subscription Status"):
+        identifier = st.session_state.subscription_lookup.strip()
+        success, message = check_subscription_status(identifier)
+        if success:
+            st.session_state.paid = True
+            st.success(message)
+            st.balloons()
+        else:
+            st.warning(message)
+st.markdown("---")
 
 # Show custom rules section if clicked
 if st.session_state.show_custom_rules:
