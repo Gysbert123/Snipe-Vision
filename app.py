@@ -951,26 +951,43 @@ def check_webhook_payment(email):
     return False, None
 
 def check_subscription_status(identifier):
-    client = get_supabase_client()
-    if not client or not identifier:
+    """Check if a user has an active subscription.
+
+    Priority:
+    1) Supabase subscriptions table (if configured)
+    2) Webhook / payment provider via check_webhook_payment (email-based)
+    """
+    if not identifier:
         return False, "Subscription lookup unavailable."
-    try:
-        query = client.table("subscriptions")\
-            .select("*")\
-            .or_(f"email.eq.{identifier},wallet.eq.{identifier}")\
-            .order("expires_at", desc=True)\
-            .limit(1)\
-            .execute()
-        data = query.data
-        if not data:
-            return False, "No active subscription found."
-        record = data[0]
-        expires_at = datetime.fromisoformat(record["expires_at"])
-        if expires_at > datetime.utcnow():
-            return True, f"Active until {expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
-        return False, "Subscription expired. Please renew."
-    except Exception as e:
-        return False, f"Lookup error: {str(e)}"
+
+    client = get_supabase_client()
+    if client:
+        try:
+            query = (
+                client.table("subscriptions")
+                .select("*")
+                .or_(f"email.eq.{identifier},wallet.eq.{identifier}")
+                .order("expires_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            data = query.data
+            if data:
+                record = data[0]
+                expires_at = datetime.fromisoformat(record["expires_at"])
+                if expires_at > datetime.utcnow():
+                    return True, f"Active until {expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
+                return False, "Subscription expired. Please renew."
+        except Exception as e:
+            # Fall through to webhook/payment check
+            pass
+
+    # Fallback: ask webhook/payment provider using email identifier
+    ok, payment = check_webhook_payment(identifier)
+    if ok:
+        return True, "Active subscription found via payment provider."
+
+    return False, "No active subscription found."
 
 
 def get_free_scan_count(email):
