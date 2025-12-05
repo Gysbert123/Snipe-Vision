@@ -515,6 +515,7 @@ Last updated: 24 November 2025
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _get_static_route():
     """Cache route detection to avoid expensive path checks on every rerun."""
     path = get_request_path().strip("/").lower()
