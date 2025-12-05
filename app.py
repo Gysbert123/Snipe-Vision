@@ -30,7 +30,21 @@ except ImportError:
     STRIPE_AVAILABLE = False
     stripe = None
 
-st.set_page_config(page_title="SnipeVision", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="SnipeVision", 
+    layout="wide", 
+    initial_sidebar_state="expanded",
+    page_icon="🎯"
+)
+
+# Inject title immediately to prevent "Streamlit" flash
+st.markdown("""
+<script>
+if (document.title !== "SnipeVision") {
+    document.title = "SnipeVision";
+}
+</script>
+""", unsafe_allow_html=True)
 
 # Initialize session state FIRST
 if 'scans' not in st.session_state:
@@ -328,7 +342,12 @@ logo_svg = """
   <line x1="412" y1="920" x2="612" y2="920" stroke="#00ff88" stroke-width="2" stroke-linecap="round" opacity="0.6" filter="url(#glow)"/>
 </svg>
 """
-NEON_LOGO = "data:image/svg+xml;base64," + base64.b64encode(logo_svg.encode("utf-8")).decode("utf-8")
+@st.cache_data(ttl=86400, show_spinner=False)
+def _get_logo_data():
+    """Cache logo encoding to avoid re-encoding on every rerun."""
+    return "data:image/svg+xml;base64," + base64.b64encode(logo_svg.encode("utf-8")).decode("utf-8")
+
+NEON_LOGO = _get_logo_data()
 
 
 def get_request_path():
@@ -495,14 +514,18 @@ Last updated: 24 November 2025
     st.stop()
 
 
-def handle_static_routes():
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_static_route():
+    """Cache route detection to avoid expensive path checks on every rerun."""
     path = get_request_path().strip("/").lower()
     page_param = st.query_params.get("page", "").lower() if st.query_params.get("page") else ""
-    target = None
     for candidate in [path, page_param]:
         if candidate in ("terms", "privacy", "refund", "pricing"):
-            target = candidate
-            break
+            return candidate
+    return None
+
+def handle_static_routes():
+    target = _get_static_route()
     if target == "terms":
         render_terms_page()
     elif target == "privacy":
@@ -511,7 +534,6 @@ def handle_static_routes():
         render_refund_page()
     elif target == "pricing":
         render_pricing_page()
-
 
 handle_static_routes()
 
@@ -1953,9 +1975,10 @@ if not st.session_state.paid:
     st.session_state.user_email = st.text_input("Command console email", value=st.session_state.user_email, placeholder="you@alpha.xyz")
     # Allow free scans only after email is provided
     email_identifier = st.session_state.user_email.strip()
-    if email_identifier:
+    if email_identifier and not st.session_state.paid:
+        # Only check subscription if not already marked as paid (avoid redundant checks)
         success, message = check_subscription_status(email_identifier)
-        if success and not st.session_state.paid:
+        if success:
             st.session_state.paid = True
             st.success(message)
     else:
